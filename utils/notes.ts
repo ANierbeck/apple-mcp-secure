@@ -1,4 +1,5 @@
 import { runAppleScript } from "run-applescript";
+import { randomBytes } from "node:crypto";
 
 // Configuration
 const CONFIG = {
@@ -236,11 +237,12 @@ async function createNote(
 		const formattedBody = body.trim();
 
 		// Use file-based approach for complex content to avoid AppleScript string issues
-		const tmpFile = `/tmp/note-content-${Date.now()}.txt`;
+		// randomBytes gives an unpredictable name — prevents symlink race attacks
+		const tmpFile = `/tmp/note-${randomBytes(16).toString("hex")}.txt`;
 		const fs = require("fs");
 
-		// Write content to temporary file to avoid AppleScript escaping issues
-		fs.writeFileSync(tmpFile, formattedBody, "utf8");
+		// mode 0o600: only the current user can read/write this file
+		fs.writeFileSync(tmpFile, formattedBody, { encoding: "utf8", mode: 0o600 });
 
 		const script = `
 tell application "Notes"

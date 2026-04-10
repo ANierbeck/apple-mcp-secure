@@ -1,7 +1,6 @@
 import {runAppleScript} from 'run-applescript';
-import { promisify } from 'node:util';
-import { exec } from 'node:child_process';
 import { access } from 'node:fs/promises';
+import { escapeAppleScriptString, validatePhoneNumber } from './applescript-escape';
 
 const execAsync = promisify(exec);
 
@@ -70,11 +69,13 @@ function normalizePhoneNumber(phone: string): string[] {
 }
 
 async function sendMessage(phoneNumber: string, message: string) {
-    const escapedMessage = message.replace(/"/g, '\\"');
+    const validatedPhone = validatePhoneNumber(phoneNumber);
+    const escapedPhone = escapeAppleScriptString(validatedPhone);
+    const escapedMessage = escapeAppleScriptString(message);
     const result = await runAppleScript(`
 tell application "Messages"
     set targetService to 1st service whose service type = iMessage
-    set targetBuddy to buddy "${phoneNumber}"
+    set targetBuddy to buddy "${escapedPhone}"
     send "${escapedMessage}" to targetBuddy
 end tell`);
     return result;

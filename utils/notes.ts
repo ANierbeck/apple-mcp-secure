@@ -1,4 +1,5 @@
 import { runAppleScript } from "run-applescript";
+import { escapeAppleScriptString, sanitizeSearchTerm, validateName } from "./applescript-escape";
 
 // Configuration
 const CONFIG = {
@@ -148,7 +149,7 @@ async function findNote(searchText: string): Promise<Note[]> {
 			return [];
 		}
 
-		const searchTerm = searchText.toLowerCase();
+		const searchTerm = escapeAppleScriptString(sanitizeSearchTerm(searchText.toLowerCase()));
 
 		const script = `
 tell application "Notes"
@@ -235,7 +236,11 @@ async function createNote(
 		// Notes.app handles markdown and formatting natively
 		const formattedBody = body.trim();
 
-		// Use file-based approach for complex content to avoid AppleScript string issues
+		// Validate and escape all user inputs before embedding in AppleScript
+		const safeFolderName = escapeAppleScriptString(validateName(folderName, 'Folder name'));
+		const safeTitle = escapeAppleScriptString(validateName(title, 'Note title'));
+
+		// Use file-based approach for note body to avoid AppleScript string size limits
 		const tmpFile = `/tmp/note-content-${Date.now()}.txt`;
 		const fs = require("fs");
 
@@ -246,13 +251,13 @@ async function createNote(
 tell application "Notes"
     set targetFolder to null
     set folderFound to false
-    set actualFolderName to "${folderName}"
+    set actualFolderName to "${safeFolderName}"
 
     -- Try to find the specified folder
     try
         set allFolders to folders
         repeat with currentFolder in allFolders
-            if name of currentFolder is "${folderName}" then
+            if name of currentFolder is "${safeFolderName}" then
                 set targetFolder to currentFolder
                 set folderFound to true
                 exit repeat
@@ -263,16 +268,16 @@ tell application "Notes"
     end try
 
     -- If folder not found and it's a test folder, try to create it
-    if not folderFound and ("${folderName}" is "Claude" or "${folderName}" is "Test-Claude") then
+    if not folderFound and ("${safeFolderName}" is "Claude" or "${safeFolderName}" is "Test-Claude") then
         try
-            make new folder with properties {name:"${folderName}"}
+            make new folder with properties {name:"${safeFolderName}"}
             -- Try to find it again
             set allFolders to folders
             repeat with currentFolder in allFolders
-                if name of currentFolder is "${folderName}" then
+                if name of currentFolder is "${safeFolderName}" then
                     set targetFolder to currentFolder
                     set folderFound to true
-                    set actualFolderName to "${folderName}"
+                    set actualFolderName to "${safeFolderName}"
                     exit repeat
                 end if
             end repeat
@@ -288,11 +293,11 @@ tell application "Notes"
     -- Create the note with proper content
     if folderFound and targetFolder is not null then
         -- Create note in specified folder
-        make new note at targetFolder with properties {name:"${title.replace(/"/g, '\\"')}", body:noteContent}
+        make new note at targetFolder with properties {name:"${safeTitle}", body:noteContent}
         return "SUCCESS:" & actualFolderName & ":false"
     else
         -- Create note in default location
-        make new note with properties {name:"${title.replace(/"/g, '\\"')}", body:noteContent}
+        make new note with properties {name:"${safeTitle}", body:noteContent}
         return "SUCCESS:Notes:true"
     end if
 end tell`;

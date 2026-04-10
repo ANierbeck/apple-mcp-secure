@@ -24,6 +24,35 @@ function tagExternalContent(source: string, content: string): string {
     );
 }
 
+/**
+ * Sanitizes errors before they are returned to the MCP client (Claude).
+ *
+ * User-facing errors (permission issues, validation failures, explicit guard
+ * rejections) are passed through verbatim because they contain actionable
+ * instructions. All other errors are genericized so that internal details —
+ * file paths, stack traces, library internals — are never leaked to the model.
+ * The full error is always logged to stderr for operator debugging.
+ */
+function sanitizeError(error: unknown, toolName: string): string {
+    const msg = error instanceof Error ? error.message : String(error);
+
+    console.error(`[${toolName}] error:`, msg);
+
+    const isUserFacing =
+        msg.toLowerCase().includes("access") ||
+        msg.toLowerCase().includes("permission") ||
+        msg.toLowerCase().includes("not allowed") ||   // SendNotAllowedError
+        msg.toLowerCase().includes("invalid") ||       // validation errors
+        msg.toLowerCase().includes("required") ||      // missing param errors
+        msg.toLowerCase().includes("cannot be empty"); // validation errors
+
+    if (isUserFacing) {
+        return msg;
+    }
+
+    return `The ${toolName} tool encountered an error. Check the MCP server logs for details.`;
+}
+
 // Safe mode implementation - lazy loading of modules
 let useEagerLoading = true;
 let loadingTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -275,14 +304,8 @@ function initServer() {
 							};
 						}
 					} catch (error) {
-						const errorMessage = error instanceof Error ? error.message : String(error);
 						return {
-							content: [
-								{
-									type: "text",
-									text: errorMessage.includes("access") ? errorMessage : `Error accessing contacts: ${errorMessage}`,
-								},
-							],
+							content: [{ type: "text", text: sanitizeError(error, "contacts") }],
 							isError: true,
 						};
 					}
@@ -374,14 +397,8 @@ function initServer() {
 								throw new Error(`Unknown operation: ${operation}`);
 						}
 					} catch (error) {
-						const errorMessage = error instanceof Error ? error.message : String(error);
 						return {
-							content: [
-								{
-									type: "text",
-									text: errorMessage.includes("access") ? errorMessage : `Error accessing notes: ${errorMessage}`,
-								},
-							],
+							content: [{ type: "text", text: sanitizeError(error, "notes") }],
 							isError: true,
 						};
 					}
@@ -522,14 +539,8 @@ function initServer() {
 								throw new Error(`Unknown operation: ${args.operation}`);
 						}
 					} catch (error) {
-						const errorMessage = error instanceof Error ? error.message : String(error);
 						return {
-							content: [
-								{
-									type: "text",
-									text: errorMessage.includes("access") ? errorMessage : `Error with messages operation: ${errorMessage}`,
-								},
-							],
+							content: [{ type: "text", text: sanitizeError(error, "messages") }],
 							isError: true,
 						};
 					}
@@ -849,14 +860,8 @@ end tell`;
 								throw new Error(`Unknown operation: ${args.operation}`);
 						}
 					} catch (error) {
-						const errorMessage = error instanceof Error ? error.message : String(error);
 						return {
-							content: [
-								{
-									type: "text",
-									text: errorMessage.includes("access") ? errorMessage : `Error with mail operation: ${errorMessage}`,
-								},
-							],
+							content: [{ type: "text", text: sanitizeError(error, "mail") }],
 							isError: true,
 						};
 					}
@@ -974,15 +979,8 @@ end tell`;
 							isError: true,
 						};
 					} catch (error) {
-						console.error("Error in reminders tool:", error);
-						const errorMessage = error instanceof Error ? error.message : String(error);
 						return {
-							content: [
-								{
-									type: "text",
-									text: errorMessage.includes("access") ? errorMessage : `Error in reminders tool: ${errorMessage}`,
-								},
-							],
+							content: [{ type: "text", text: sanitizeError(error, "reminders") }],
 							isError: true,
 						};
 					}
@@ -1121,14 +1119,8 @@ end tell`;
 								throw new Error(`Unknown calendar operation: ${operation}`);
 						}
 					} catch (error) {
-						const errorMessage = error instanceof Error ? error.message : String(error);
 						return {
-							content: [
-								{
-									type: "text",
-									text: errorMessage.includes("access") ? errorMessage : `Error in calendar tool: ${errorMessage}`,
-								},
-							],
+							content: [{ type: "text", text: sanitizeError(error, "calendar") }],
 							isError: true,
 						};
 					}
@@ -1301,14 +1293,8 @@ end tell`;
 								throw new Error(`Unknown maps operation: ${operation}`);
 						}
 					} catch (error) {
-						const errorMessage = error instanceof Error ? error.message : String(error);
 						return {
-							content: [
-								{
-									type: "text",
-									text: errorMessage.includes("access") ? errorMessage : `Error in maps tool: ${errorMessage}`,
-								},
-							],
+							content: [{ type: "text", text: sanitizeError(error, "maps") }],
 							isError: true,
 						};
 					}

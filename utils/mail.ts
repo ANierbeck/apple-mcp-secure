@@ -1,4 +1,5 @@
 import { runAppleScript } from "run-applescript";
+import { randomBytes } from "node:crypto";
 import { escapeAppleScriptString, sanitizeSearchTerm, validateEmail, validateName } from "./applescript-escape";
 
 // Configuration
@@ -289,11 +290,12 @@ async function sendMail(
 		const safeBcc = bcc ? escapeAppleScriptString(validateEmail(bcc)) : null;
 
 		// Use file-based approach for email body to avoid AppleScript escaping issues
-		const tmpFile = `/tmp/email-body-${Date.now()}.txt`;
+		// randomBytes gives an unpredictable name — prevents symlink race attacks
+		const tmpFile = `/tmp/email-${randomBytes(16).toString("hex")}.txt`;
 		const fs = require("fs");
 
-		// Write content to temporary file
-		fs.writeFileSync(tmpFile, body.trim(), "utf8");
+		// mode 0o600: only the current user can read/write this file
+		fs.writeFileSync(tmpFile, body.trim(), { encoding: "utf8", mode: 0o600 });
 
 		const script = `
 tell application "Mail"

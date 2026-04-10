@@ -1,4 +1,5 @@
 import { runAppleScript } from "run-applescript";
+import { randomBytes } from "node:crypto";
 import { escapeAppleScriptString, sanitizeSearchTerm, validateName } from "./applescript-escape";
 
 // Configuration
@@ -240,12 +241,12 @@ async function createNote(
 		const safeFolderName = escapeAppleScriptString(validateName(folderName, 'Folder name'));
 		const safeTitle = escapeAppleScriptString(validateName(title, 'Note title'));
 
-		// Use file-based approach for note body to avoid AppleScript string size limits
-		const tmpFile = `/tmp/note-content-${Date.now()}.txt`;
+		// randomBytes gives an unpredictable name — prevents symlink race attacks
+		const tmpFile = `/tmp/note-${randomBytes(16).toString("hex")}.txt`;
 		const fs = require("fs");
 
-		// Write content to temporary file to avoid AppleScript escaping issues
-		fs.writeFileSync(tmpFile, formattedBody, "utf8");
+		// mode 0o600: only the current user can read/write this file
+		fs.writeFileSync(tmpFile, formattedBody, { encoding: "utf8", mode: 0o600 });
 
 		const script = `
 tell application "Notes"

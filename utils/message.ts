@@ -1,9 +1,6 @@
 import {runAppleScript} from 'run-applescript';
-import { promisify } from 'node:util';
-import { exec } from 'node:child_process';
+import { Database } from 'bun:sqlite';
 import { access } from 'node:fs/promises';
-
-const execAsync = promisify(exec);
 
 // Configuration
 const CONFIG = {
@@ -15,26 +12,6 @@ const CONFIG = {
     TIMEOUT_MS: 8000
 };
 
-// Retry configuration
-const MAX_RETRIES = 3;
-const RETRY_DELAY = 1000; // 1 second
-
-async function sleep(ms: number) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-async function retryOperation<T>(operation: () => Promise<T>, retries = MAX_RETRIES, delay = RETRY_DELAY): Promise<T> {
-    try {
-        return await operation();
-    } catch (error) {
-        if (retries > 0) {
-            console.error(`Operation failed, retrying... (${retries} attempts remaining)`);
-            await sleep(delay);
-            return retryOperation(operation, retries - 1, delay);
-        }
-        throw error;
-    }
-}
 
 function normalizePhoneNumber(phone: string): string[] {
     // Remove all non-numeric characters except +
@@ -89,28 +66,24 @@ interface Message {
     url?: string;
 }
 
+function getMessagesDB(): Database {
+    const dbPath = `${process.env.HOME}/Library/Messages/chat.db`;
+    return new Database(dbPath, { readonly: true });
+}
+
 async function checkMessagesDBAccess(): Promise<boolean> {
     try {
         const dbPath = `${process.env.HOME}/Library/Messages/chat.db`;
         await access(dbPath);
-        
-        // Additional check - try to query the database
-        await execAsync(`sqlite3 "${dbPath}" "SELECT 1;"`);
-        
+
+        // Verify we can actually open and query the DB
+        const db = getMessagesDB();
+        db.prepare('SELECT 1').get();
+        db.close();
+
         return true;
     } catch (error) {
-        console.error(`
-Error: Cannot access Messages database.
-To fix this, please grant Full Disk Access to Terminal/iTerm2:
-1. Open System Preferences
-2. Go to Security & Privacy > Privacy
-3. Select "Full Disk Access" from the left sidebar
-4. Click the lock icon to make changes
-5. Add Terminal.app or iTerm.app to the list
-6. Restart your terminal and try again
-
-Error details: ${error instanceof Error ? error.message : String(error)}
-`);
+        console.error('Error: Cannot access Messages database.', error instanceof Error ? error.message : String(error));
         return false;
     }
 }
@@ -231,26 +204,21 @@ function decodeAttributedBody(hexString: string): { text: string; url?: string }
     }
 }
 
-async function getAttachmentPaths(messageId: number): Promise<string[]> {
+function getAttachmentPaths(messageId: number): string[] {
     try {
-        const query = `
+        const db = getMessagesDB();
+        const stmt = db.prepare<{ filename: string }, [number]>(`
             SELECT filename
             FROM attachment
-            INNER JOIN message_attachment_join 
+            INNER JOIN message_attachment_join
             ON attachment.ROWID = message_attachment_join.attachment_id
-            WHERE message_attachment_join.message_id = ${messageId}
-        `;
-        
-        const { stdout } = await execAsync(`sqlite3 -json "${process.env.HOME}/Library/Messages/chat.db" "${query}"`);
-        
-        if (!stdout.trim()) {
-            return [];
-        }
-        
-        const attachments = JSON.parse(stdout) as { filename: string }[];
-        return attachments.map(a => a.filename).filter(Boolean);
+            WHERE message_attachment_join.message_id = ?
+        `);
+        const rows = stmt.all(messageId);
+        db.close();
+        return rows.map(r => r.filename).filter(Boolean);
     } catch (error) {
-        console.error('Error getting attachments:', error);
+        console.error('Error getting attachments:', error instanceof Error ? error.message : String(error));
         return [];
     }
 }
@@ -269,14 +237,22 @@ async function readMessages(phoneNumber: string, limit = 10): Promise<Message[]>
         // Get all possible formats of the phone number
         const phoneFormats = normalizePhoneNumber(phoneNumber);
         console.error("Trying phone formats:", phoneFormats);
-        
-        // Create SQL IN clause with all phone number formats
-        const phoneList = phoneFormats.map(p => `'${p.replace(/'/g, "''")}'`).join(',');
-        
-        const query = `
-            SELECT 
+
+        // Build parameterized IN clause — values are bound, never interpolated
+        const placeholders = phoneFormats.map(() => '?').join(',');
+
+        const db = getMessagesDB();
+        type RawMessage = Message & {
+            message_id: number;
+            is_audio_message: number;
+            cache_has_attachments: number;
+            subject: string | null;
+            content_type: number;
+        };
+        const stmt = db.prepare<RawMessage, string[]>(`
+            SELECT
                 m.ROWID as message_id,
-                CASE 
+                CASE
                     WHEN m.text IS NOT NULL AND m.text != '' THEN m.text
                     WHEN m.attributedBody IS NOT NULL THEN hex(m.attributedBody)
                     ELSE NULL
@@ -287,103 +263,72 @@ async function readMessages(phoneNumber: string, limit = 10): Promise<Message[]>
                 m.is_audio_message,
                 m.cache_has_attachments,
                 m.subject,
-                CASE 
+                CASE
                     WHEN m.text IS NOT NULL AND m.text != '' THEN 0
                     WHEN m.attributedBody IS NOT NULL THEN 1
                     ELSE 2
                 END as content_type
-            FROM message m 
-            INNER JOIN handle h ON h.ROWID = m.handle_id 
-            WHERE h.id IN (${phoneList})
+            FROM message m
+            INNER JOIN handle h ON h.ROWID = m.handle_id
+            WHERE h.id IN (${placeholders})
                 AND (m.text IS NOT NULL OR m.attributedBody IS NOT NULL OR m.cache_has_attachments = 1)
-                AND m.is_from_me IS NOT NULL  -- Ensure it's a real message
-                AND m.item_type = 0  -- Regular messages only
-                AND m.is_audio_message = 0  -- Skip audio messages
-            ORDER BY m.date DESC 
-            LIMIT ${maxLimit}
-        `;
+                AND m.is_from_me IS NOT NULL
+                AND m.item_type = 0
+                AND m.is_audio_message = 0
+            ORDER BY m.date DESC
+            LIMIT ?
+        `);
+        const messages = stmt.all(...phoneFormats, String(maxLimit));
+        db.close();
 
-        // Execute query with retries
-        const { stdout } = await retryOperation(() => 
-            execAsync(`sqlite3 -json "${process.env.HOME}/Library/Messages/chat.db" "${query}"`)
-        );
-        
-        if (!stdout.trim()) {
+        if (messages.length === 0) {
             console.error("No messages found in database for the given phone number");
             return [];
         }
 
-        const messages = JSON.parse(stdout) as (Message & {
-            message_id: number;
-            is_audio_message: number;
-            cache_has_attachments: number;
-            subject: string | null;
-            content_type: number;
-        })[];
+        const processedMessages = messages
+            .filter(msg => msg.content !== null || msg.cache_has_attachments === 1)
+            .map(msg => {
+                let content = msg.content || '';
+                let url: string | undefined;
 
-        // Process messages with potential parallel attachment fetching
-        const processedMessages = await Promise.all(
-            messages
-                .filter(msg => msg.content !== null || msg.cache_has_attachments === 1)
-                .map(async msg => {
-                    let content = msg.content || '';
-                    let url: string | undefined;
-                    
-                    // If it's an attributedBody (content_type = 1), decode it
-                    if (msg.content_type === 1) {
-                        const decoded = decodeAttributedBody(content);
-                        content = decoded.text;
-                        url = decoded.url;
-                    } else {
-                        // Check for URLs in regular text messages
-                        const urlMatch = content.match(/(https?:\/\/[^\s]+)/);
-                        if (urlMatch) {
-                            url = urlMatch[1];
-                        }
-                    }
-                    
-                    // Get attachments if any
-                    let attachments: string[] = [];
-                    if (msg.cache_has_attachments) {
-                        attachments = await getAttachmentPaths(msg.message_id);
-                    }
-                    
-                    // Add subject if present
-                    if (msg.subject) {
-                        content = `Subject: ${msg.subject}\n${content}`;
-                    }
-                    
-                    // Format the message object
-                    const formattedMsg: Message = {
-                        content: content || '[No text content]',
-                        date: new Date(msg.date).toISOString(),
-                        sender: msg.sender,
-                        is_from_me: Boolean(msg.is_from_me)
-                    };
+                if (msg.content_type === 1) {
+                    const decoded = decodeAttributedBody(content);
+                    content = decoded.text;
+                    url = decoded.url;
+                } else {
+                    const urlMatch = content.match(/(https?:\/\/[^\s]+)/);
+                    if (urlMatch) url = urlMatch[1];
+                }
 
-                    // Add attachments if any
-                    if (attachments.length > 0) {
-                        formattedMsg.attachments = attachments;
-                        formattedMsg.content += `\n[Attachments: ${attachments.length}]`;
-                    }
+                const attachments: string[] = msg.cache_has_attachments
+                    ? getAttachmentPaths(msg.message_id)
+                    : [];
 
-                    // Add URL if present
-                    if (url) {
-                        formattedMsg.url = url;
-                        formattedMsg.content += `\n[URL: ${url}]`;
-                    }
+                if (msg.subject) content = `Subject: ${msg.subject}\n${content}`;
 
-                    return formattedMsg;
-                })
-        );
+                const formattedMsg: Message = {
+                    content: content || '[No text content]',
+                    date: new Date(msg.date).toISOString(),
+                    sender: msg.sender,
+                    is_from_me: Boolean(msg.is_from_me)
+                };
+
+                if (attachments.length > 0) {
+                    formattedMsg.attachments = attachments;
+                    formattedMsg.content += `\n[Attachments: ${attachments.length}]`;
+                }
+                if (url) {
+                    formattedMsg.url = url;
+                    formattedMsg.content += `\n[URL: ${url}]`;
+                }
+
+                return formattedMsg;
+            });
 
         return processedMessages;
     } catch (error) {
-        console.error('Error reading messages:', error);
-        if (error instanceof Error) {
-            console.error('Error details:', error.message);
-            console.error('Stack trace:', error.stack);
-        }
+        console.error('Error reading messages:', error instanceof Error ? error.message : String(error));
         return [];
     }
 }
@@ -399,10 +344,18 @@ async function getUnreadMessages(limit = 10): Promise<Message[]> {
             throw new Error(accessResult.message);
         }
 
-        const query = `
-            SELECT 
+        type RawMessage = Message & {
+            message_id: number;
+            is_audio_message: number;
+            cache_has_attachments: number;
+            subject: string | null;
+            content_type: number;
+        };
+        const db = getMessagesDB();
+        const stmt = db.prepare<RawMessage, [number]>(`
+            SELECT
                 m.ROWID as message_id,
-                CASE 
+                CASE
                     WHEN m.text IS NOT NULL AND m.text != '' THEN m.text
                     WHEN m.attributedBody IS NOT NULL THEN hex(m.attributedBody)
                     ELSE NULL
@@ -413,103 +366,72 @@ async function getUnreadMessages(limit = 10): Promise<Message[]> {
                 m.is_audio_message,
                 m.cache_has_attachments,
                 m.subject,
-                CASE 
+                CASE
                     WHEN m.text IS NOT NULL AND m.text != '' THEN 0
                     WHEN m.attributedBody IS NOT NULL THEN 1
                     ELSE 2
                 END as content_type
-            FROM message m 
-            INNER JOIN handle h ON h.ROWID = m.handle_id 
-            WHERE m.is_from_me = 0  -- Only messages from others
-                AND m.is_read = 0   -- Only unread messages
+            FROM message m
+            INNER JOIN handle h ON h.ROWID = m.handle_id
+            WHERE m.is_from_me = 0
+                AND m.is_read = 0
                 AND (m.text IS NOT NULL OR m.attributedBody IS NOT NULL OR m.cache_has_attachments = 1)
-                AND m.is_audio_message = 0  -- Skip audio messages
-                AND m.item_type = 0  -- Regular messages only
-            ORDER BY m.date DESC 
-            LIMIT ${maxLimit}
-        `;
+                AND m.is_audio_message = 0
+                AND m.item_type = 0
+            ORDER BY m.date DESC
+            LIMIT ?
+        `);
+        const messages = stmt.all(maxLimit);
+        db.close();
 
-        // Execute query with retries
-        const { stdout } = await retryOperation(() => 
-            execAsync(`sqlite3 -json "${process.env.HOME}/Library/Messages/chat.db" "${query}"`)
-        );
-        
-        if (!stdout.trim()) {
+        if (messages.length === 0) {
             console.error("No unread messages found");
             return [];
         }
 
-        const messages = JSON.parse(stdout) as (Message & {
-            message_id: number;
-            is_audio_message: number;
-            cache_has_attachments: number;
-            subject: string | null;
-            content_type: number;
-        })[];
+        const processedMessages = messages
+            .filter(msg => msg.content !== null || msg.cache_has_attachments === 1)
+            .map(msg => {
+                let content = msg.content || '';
+                let url: string | undefined;
 
-        // Process messages with potential parallel attachment fetching
-        const processedMessages = await Promise.all(
-            messages
-                .filter(msg => msg.content !== null || msg.cache_has_attachments === 1)
-                .map(async msg => {
-                    let content = msg.content || '';
-                    let url: string | undefined;
-                    
-                    // If it's an attributedBody (content_type = 1), decode it
-                    if (msg.content_type === 1) {
-                        const decoded = decodeAttributedBody(content);
-                        content = decoded.text;
-                        url = decoded.url;
-                    } else {
-                        // Check for URLs in regular text messages
-                        const urlMatch = content.match(/(https?:\/\/[^\s]+)/);
-                        if (urlMatch) {
-                            url = urlMatch[1];
-                        }
-                    }
-                    
-                    // Get attachments if any
-                    let attachments: string[] = [];
-                    if (msg.cache_has_attachments) {
-                        attachments = await getAttachmentPaths(msg.message_id);
-                    }
-                    
-                    // Add subject if present
-                    if (msg.subject) {
-                        content = `Subject: ${msg.subject}\n${content}`;
-                    }
-                    
-                    // Format the message object
-                    const formattedMsg: Message = {
-                        content: content || '[No text content]',
-                        date: new Date(msg.date).toISOString(),
-                        sender: msg.sender,
-                        is_from_me: Boolean(msg.is_from_me)
-                    };
+                if (msg.content_type === 1) {
+                    const decoded = decodeAttributedBody(content);
+                    content = decoded.text;
+                    url = decoded.url;
+                } else {
+                    const urlMatch = content.match(/(https?:\/\/[^\s]+)/);
+                    if (urlMatch) url = urlMatch[1];
+                }
 
-                    // Add attachments if any
-                    if (attachments.length > 0) {
-                        formattedMsg.attachments = attachments;
-                        formattedMsg.content += `\n[Attachments: ${attachments.length}]`;
-                    }
+                const attachments: string[] = msg.cache_has_attachments
+                    ? getAttachmentPaths(msg.message_id)
+                    : [];
 
-                    // Add URL if present
-                    if (url) {
-                        formattedMsg.url = url;
-                        formattedMsg.content += `\n[URL: ${url}]`;
-                    }
+                if (msg.subject) content = `Subject: ${msg.subject}\n${content}`;
 
-                    return formattedMsg;
-                })
-        );
+                const formattedMsg: Message = {
+                    content: content || '[No text content]',
+                    date: new Date(msg.date).toISOString(),
+                    sender: msg.sender,
+                    is_from_me: Boolean(msg.is_from_me)
+                };
+
+                if (attachments.length > 0) {
+                    formattedMsg.attachments = attachments;
+                    formattedMsg.content += `\n[Attachments: ${attachments.length}]`;
+                }
+                if (url) {
+                    formattedMsg.url = url;
+                    formattedMsg.content += `\n[URL: ${url}]`;
+                }
+
+                return formattedMsg;
+            });
 
         return processedMessages;
     } catch (error) {
-        console.error('Error reading unread messages:', error);
-        if (error instanceof Error) {
-            console.error('Error details:', error.message);
-            console.error('Stack trace:', error.stack);
-        }
+        console.error('Error reading unread messages:', error instanceof Error ? error.message : String(error));
         return [];
     }
 }

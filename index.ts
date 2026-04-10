@@ -7,7 +7,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { runAppleScript } from "run-applescript";
 import tools from "./tools";
-
+import { assertSendAllowed, SendNotAllowedError } from "./utils/send-guard";
 
 // Safe mode implementation - lazy loading of modules
 let useEagerLoading = true;
@@ -381,6 +381,8 @@ function initServer() {
 										"Phone number and message are required for send operation",
 									);
 								}
+								const contactsForMsg = await loadModule("contacts");
+								await assertSendAllowed("message", args.phoneNumber, contactsForMsg);
 								await messageModule.sendMessage(args.phoneNumber, args.message);
 								return {
 									content: [
@@ -710,6 +712,8 @@ end tell`;
 										"Recipient (to), subject, and body are required for send operation",
 									);
 								}
+								const contactsForMail = await loadModule("contacts");
+								await assertSendAllowed("email", args.to, contactsForMail);
 								const result = await mailModule.sendMail(
 									args.to,
 									args.subject,

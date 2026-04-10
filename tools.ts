@@ -3,6 +3,10 @@ import { type Tool } from "@modelcontextprotocol/sdk/types.js";
 const CONTACTS_TOOL: Tool = {
     name: "contacts",
     description: "Search and retrieve contacts from Apple Contacts app",
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -15,8 +19,12 @@ const CONTACTS_TOOL: Tool = {
   };
   
   const NOTES_TOOL: Tool = {
-    name: "notes", 
+    name: "notes",
     description: "Search, retrieve and create notes in Apple Notes app",
+    annotations: {
+      readOnlyHint: false,   // 'create' operation writes new notes
+      destructiveHint: false, // only additive — does not delete or overwrite
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -49,6 +57,10 @@ const CONTACTS_TOOL: Tool = {
   const MESSAGES_TOOL: Tool = {
     name: "messages",
     description: "Interact with Apple Messages app - send, read, schedule messages and check unread messages",
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true, // 'send'/'schedule' dispatch irreversible iMessages
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -81,6 +93,10 @@ const CONTACTS_TOOL: Tool = {
   const MAIL_TOOL: Tool = {
     name: "mail",
     description: "Interact with Apple Mail app - read unread emails, search emails, and send emails",
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true, // 'send' operation dispatches irreversible emails
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -133,6 +149,10 @@ const CONTACTS_TOOL: Tool = {
   const REMINDERS_TOOL: Tool = {
     name: "reminders",
     description: "Search, create, and open reminders in Apple Reminders app",
+    annotations: {
+      readOnlyHint: false,   // 'create' operation writes new reminders
+      destructiveHint: false, // only additive — does not delete existing data
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -181,6 +201,10 @@ const CONTACTS_TOOL: Tool = {
 const CALENDAR_TOOL: Tool = {
   name: "calendar",
   description: "Search, create, and open calendar events in Apple Calendar app",
+  annotations: {
+    readOnlyHint: false,   // 'create' operation writes new calendar events
+    destructiveHint: false, // only additive — does not delete existing events
+  },
   inputSchema: {
     type: "object",
     properties: {
@@ -245,6 +269,10 @@ const CALENDAR_TOOL: Tool = {
 const MAPS_TOOL: Tool = {
   name: "maps",
   description: "Search locations, manage guides, save favorites, and get directions using Apple Maps",
+  annotations: {
+    readOnlyHint: false,   // 'save', 'pin', 'createGuide', 'addToGuide' write state
+    destructiveHint: false, // no deletions — only additive operations
+  },
   inputSchema: {
     type: "object",
     properties: {

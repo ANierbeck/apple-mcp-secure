@@ -1,4 +1,5 @@
 import { runAppleScript } from "run-applescript";
+import { escapeAppleScriptString, sanitizeSearchTerm, validatePhoneNumber } from "./applescript-escape";
 
 // Configuration
 const CONFIG = {
@@ -137,13 +138,14 @@ async function findNumber(name: string): Promise<string[]> {
 			return [];
 		}
 
-		const searchName = name.toLowerCase().trim();
+		const searchName = sanitizeSearchTerm(name.toLowerCase());
+		const escapedSearchName = escapeAppleScriptString(searchName);
 
 		// First try exact and partial matching with AppleScript
 		const script = `
 tell application "Contacts"
     set matchedPhones to {}
-    set searchText to "${searchName}"
+    set searchText to "${escapedSearchName}"
 
     -- Get a limited number of people to search through
     set allPeople to people
@@ -334,13 +336,15 @@ async function findContactByPhone(phoneNumber: string): Promise<string | null> {
 			return null;
 		}
 
-		// Normalize the phone number for comparison
+		// Normalize and validate the phone number before using in AppleScript
+		validatePhoneNumber(phoneNumber);
 		const searchNumber = phoneNumber.replace(/[^0-9+]/g, "");
+		const escapedSearchNumber = escapeAppleScriptString(searchNumber);
 
 		const script = `
 tell application "Contacts"
     set foundName to ""
-    set searchPhone to "${searchNumber}"
+    set searchPhone to "${escapedSearchNumber}"
 
     -- Get a limited number of people to search through
     set allPeople to people

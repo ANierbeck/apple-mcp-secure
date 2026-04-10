@@ -1,4 +1,5 @@
 import { runAppleScript } from "run-applescript";
+import { escapeAppleScriptString, sanitizeSearchTerm, validateEmail, validateName } from "./applescript-escape";
 
 // Configuration
 const CONFIG = {
@@ -173,7 +174,7 @@ async function searchMails(
 		}
 
 		const maxEmails = Math.min(limit, CONFIG.MAX_EMAILS);
-		const cleanSearchTerm = searchTerm.toLowerCase();
+		const cleanSearchTerm = escapeAppleScriptString(sanitizeSearchTerm(searchTerm.toLowerCase()));
 
 		const script = `
 tell application "Mail"
@@ -281,6 +282,12 @@ async function sendMail(
 			throw new Error("Email body is required");
 		}
 
+		// Validate and escape all user inputs
+		const safeSubject = escapeAppleScriptString(validateName(subject, 'Subject', 998));
+		const safeTo = escapeAppleScriptString(validateEmail(to));
+		const safeCc = cc ? escapeAppleScriptString(validateEmail(cc)) : null;
+		const safeBcc = bcc ? escapeAppleScriptString(validateEmail(bcc)) : null;
+
 		// Use file-based approach for email body to avoid AppleScript escaping issues
 		const tmpFile = `/tmp/email-body-${Date.now()}.txt`;
 		const fs = require("fs");
@@ -296,12 +303,12 @@ tell application "Mail"
     set emailBody to read file POSIX file "${tmpFile}" as «class utf8»
 
     -- Create new message
-    set newMessage to make new outgoing message with properties {subject:"${subject.replace(/"/g, '\\"')}", content:emailBody, visible:true}
+    set newMessage to make new outgoing message with properties {subject:"${safeSubject}", content:emailBody, visible:true}
 
     tell newMessage
-        make new to recipient with properties {address:"${to.replace(/"/g, '\\"')}"}
-        ${cc ? `make new cc recipient with properties {address:"${cc.replace(/"/g, '\\"')}"}` : ""}
-        ${bcc ? `make new bcc recipient with properties {address:"${bcc.replace(/"/g, '\\"')}"}` : ""}
+        make new to recipient with properties {address:"${safeTo}"}
+        ${safeCc ? `make new cc recipient with properties {address:"${safeCc}"}` : ""}
+        ${safeBcc ? `make new bcc recipient with properties {address:"${safeBcc}"}` : ""}
     end tell
 
     send newMessage
@@ -432,7 +439,7 @@ tell application "Mail"
 
     try
         -- Find the account
-        set targetAccount to first account whose name is "${accountName.replace(/"/g, '\\"')}"
+        set targetAccount to first account whose name is "${escapeAppleScriptString(validateName(accountName, 'Account name'))}"
         set accountMailboxes to mailboxes of targetAccount
 
         repeat with i from 1 to (count of accountMailboxes)
@@ -484,7 +491,7 @@ async function getLatestMails(
 tell application "Mail"
     set resultList to {}
     try
-        set targetAccount to first account whose name is "${account.replace(/"/g, '\\"')}"
+        set targetAccount to first account whose name is "${escapeAppleScriptString(validateName(account, 'Account name'))}"
         set acctMailboxes to every mailbox of targetAccount
 
         repeat with mb in acctMailboxes

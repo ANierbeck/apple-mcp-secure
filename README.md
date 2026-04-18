@@ -145,6 +145,37 @@ Here's a step-by-step video walkthrough: https://x.com/DhravyaShah/status/189269
 "Find the nearest pizza place and save it to my favorites"
 ```
 
+## ⚙️ Configuration
+
+### Account & Calendar Filtering
+
+Restrict which mail accounts and calendars are accessible via environment variables:
+
+**Mail Account Whitelist:**
+```bash
+APPLE_MCP_MAIL_ACCOUNT_WHITELIST=Work,Personal
+```
+Only these accounts appear in unread/search results. If unset, all accounts are visible.
+
+**Calendar Blocklist:**
+```bash
+APPLE_MCP_CALENDAR_BLOCKLIST=Work,Projects
+```
+Exclude these calendars from results.
+
+**Calendar Allowlist:**
+```bash
+APPLE_MCP_CALENDAR_ALLOWLIST=Personal,Family
+```
+If set, *only* these calendars are queried. Overrides blocklist.
+
+Store these in your `.env.local` (not committed to git):
+```bash
+# .env.local
+APPLE_MCP_MAIL_ACCOUNT_WHITELIST=Work
+APPLE_MCP_CALENDAR_BLOCKLIST=Archive
+```
+
 ## 🛠️ Local Development (For the Tinkerers)
 
 ```bash

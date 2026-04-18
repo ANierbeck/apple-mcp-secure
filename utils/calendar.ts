@@ -27,7 +27,7 @@ const CONFIG = {
 
 /**
  * APPLE_MCP_CALENDAR_BLOCKLIST — comma-separated calendar names to exclude.
- * Example: APPLE_MCP_CALENDAR_BLOCKLIST="achim.nierbeck@codecentric.de,Stuttgart Büro"
+ * Example: APPLE_MCP_CALENDAR_BLOCKLIST="Work,Projects"
  */
 function getBlockedCalendars(): Set<string> {
 	const raw = process.env.APPLE_MCP_CALENDAR_BLOCKLIST;
@@ -37,7 +37,7 @@ function getBlockedCalendars(): Set<string> {
 
 /**
  * APPLE_MCP_CALENDAR_ALLOWLIST — if set, only these calendars are queried.
- * Example: APPLE_MCP_CALENDAR_ALLOWLIST="Privat,Arbeit,Family"
+ * Example: APPLE_MCP_CALENDAR_ALLOWLIST="Personal,Work,Family"
  */
 function getAllowedCalendars(): Set<string> | null {
 	const raw = process.env.APPLE_MCP_CALENDAR_ALLOWLIST;

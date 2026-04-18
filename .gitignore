@@ -187,3 +187,9 @@ dist
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# Test files with real account data (live tests, git-ignored for security)
+tests/**/*.live.test.ts
+tests/**/live/
+test-results/
+*.test.log

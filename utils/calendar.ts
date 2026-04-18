@@ -1,5 +1,12 @@
 import { runAppleScript } from "run-applescript";
 import { ensureAppRunning } from "./app-launcher.js";
+import {
+	listCalendarsViaEventKit,
+	getEventsViaEventKit,
+	searchEventsViaEventKit,
+	isEventKitAvailable,
+	type EventKitEvent as EventKitEventType,
+} from "./eventkit.js";
 
 interface CalendarEvent {
 	id: string;
@@ -135,11 +142,32 @@ async function requestCalendarAccess(): Promise<{ hasAccess: boolean; message: s
 
 // ---------------------------------------------------------------------------
 // listCalendars — returns all calendars with their filter status
+// Tries EventKit first (fast, no timeout), falls back to AppleScript
 // ---------------------------------------------------------------------------
 
 async function listCalendars(): Promise<
 	Array<{ name: string; eventCount: number; allowed: boolean }>
 > {
+	// Try EventKit first (new, fast)
+	if (isEventKitAvailable()) {
+		try {
+			console.error("[calendar] Using EventKit for listCalendars (fast path)");
+			const ekCalendars = await listCalendarsViaEventKit();
+
+			return ekCalendars
+				.filter((cal) => isCalendarAllowed(cal.name))
+				.map((cal) => ({
+					name: cal.name,
+					eventCount: cal.eventCount,
+					allowed: true,
+				}));
+		} catch (error) {
+			console.error("[calendar] EventKit failed, falling back to AppleScript:", error instanceof Error ? error.message : String(error));
+			// Fall through to AppleScript
+		}
+	}
+
+	// Fallback to AppleScript (existing implementation)
 	await ensureAppRunning("Calendar", "return name of first calendar");
 	const access = await requestCalendarAccess();
 	if (!access.hasAccess) throw new Error(access.message);
@@ -211,6 +239,47 @@ async function getEvents(
 	fromDate?: string,
 	toDate?: string,
 ): Promise<CalendarEvent[]> {
+	// Try EventKit first (new, fast, no per-calendar timeout)
+	if (isEventKitAvailable()) {
+		try {
+			console.error("[calendar] Using EventKit for getEvents (fast path)");
+
+			const today = new Date();
+			today.setHours(0, 0, 0, 0);
+			const defaultEnd = new Date(today);
+			defaultEnd.setDate(today.getDate() + 28);
+			defaultEnd.setHours(23, 59, 59, 999);
+
+			const start = fromDate ? new Date(fromDate) : today;
+			const end = toDate ? new Date(toDate) : defaultEnd;
+
+			// Get all calendars to filter
+			const allCals = await listCalendars();
+			const queryCalNames = allCals.filter((c) => c.allowed).map((c) => c.name);
+
+			const ekEvents = await getEventsViaEventKit(start, end, queryCalNames);
+
+			// Convert EventKit format to CalendarEvent format
+			const events: CalendarEvent[] = ekEvents.slice(0, limit).map((ek) => ({
+				id: ek.id,
+				title: ek.title,
+				location: ek.location,
+				notes: ek.notes,
+				startDate: ek.startDate,
+				endDate: ek.endDate,
+				calendarName: ek.calendar,
+				isAllDay: ek.isAllDay,
+				url: null, // EventKit doesn't provide URL
+			}));
+
+			return events;
+		} catch (error) {
+			console.error("[calendar] EventKit failed, falling back to AppleScript:", error instanceof Error ? error.message : String(error));
+			// Fall through to AppleScript
+		}
+	}
+
+	// Fallback to AppleScript (existing implementation)
 	try {
 		await ensureAppRunning("Calendar", "return name of first calendar");
 
@@ -309,7 +378,7 @@ end tell`;
 }
 
 // ---------------------------------------------------------------------------
-// searchEvents
+// searchEvents — tries EventKit first (full-text), falls back to AppleScript
 // ---------------------------------------------------------------------------
 
 async function searchEvents(
@@ -318,6 +387,45 @@ async function searchEvents(
 	fromDate?: string,
 	toDate?: string,
 ): Promise<CalendarEvent[]> {
+	// Try EventKit first (new, supports full-text search)
+	if (isEventKitAvailable()) {
+		try {
+			console.error("[calendar] Using EventKit for searchEvents");
+
+			const today = new Date();
+			today.setHours(0, 0, 0, 0);
+			const defaultEnd = new Date(today);
+			defaultEnd.setDate(today.getDate() + 28);
+			defaultEnd.setHours(23, 59, 59, 999);
+
+			const start = fromDate ? new Date(fromDate) : today;
+			const end = toDate ? new Date(toDate) : defaultEnd;
+
+			// Get all calendars to filter
+			const allCals = await listCalendars();
+			const queryCalNames = allCals.filter((c) => c.allowed).map((c) => c.name);
+
+			const ekEvents = await searchEventsViaEventKit(searchText, start, end, queryCalNames);
+
+			// Convert EventKit format to CalendarEvent format
+			const events: CalendarEvent[] = ekEvents.slice(0, limit).map((ek) => ({
+				id: ek.id,
+				title: ek.title,
+				location: ek.location,
+				notes: ek.notes,
+				startDate: ek.startDate,
+				endDate: ek.endDate,
+				calendarName: ek.calendar,
+				isAllDay: ek.isAllDay,
+				url: null,
+			}));
+
+			return events;
+		} catch (error) {
+			console.error("[calendar] EventKit search failed, falling back to AppleScript:", error instanceof Error ? error.message : String(error));
+			// Fall through to AppleScript
+		}
+	}
 	try {
 		await ensureAppRunning("Calendar", "return name of first calendar");
 

@@ -1,4 +1,5 @@
 import { run } from '@jxa/run';
+import { ensureAppRunning } from './app-launcher.js';
 
 // Type definitions
 interface MapLocation {
@@ -80,6 +81,7 @@ async function checkMapsAccess(): Promise<boolean> {
  */
 async function requestMapsAccess(): Promise<{ hasAccess: boolean; message: string }> {
     try {
+        await ensureAppRunning("Maps");
         // First check if we already have access
         const hasAccess = await checkMapsAccess();
         if (hasAccess) {

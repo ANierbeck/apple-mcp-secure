@@ -92,22 +92,22 @@ const CONTACTS_TOOL: Tool = {
   
   const MAIL_TOOL: Tool = {
     name: "mail",
-    description: "Interact with Apple Mail app - read unread emails, search emails, and send emails",
+    description: "Interact with Apple Mail app - read unread emails, search emails, send emails, and trash emails",
     annotations: {
       readOnlyHint: false,
-      destructiveHint: true, // 'send' operation dispatches irreversible emails
+      destructiveHint: true, // 'send' dispatches irreversible emails; 'trash' moves to Trash (recoverable)
     },
     inputSchema: {
       type: "object",
       properties: {
         operation: {
           type: "string",
-          description: "Operation to perform: 'unread', 'search', 'send', 'mailboxes', 'accounts', or 'latest'",
-          enum: ["unread", "search", "send", "mailboxes", "accounts", "latest"]
+          description: "Operation to perform: 'unread', 'search', 'send', 'mailboxes', 'accounts', 'latest', 'trash', or 'markRead'",
+          enum: ["unread", "search", "send", "mailboxes", "accounts", "latest", "trash", "markRead"]
         },
         account: {
           type: "string",
-          description: "Email account to use (optional - if not provided, searches across all accounts)"
+          description: "Email account to use (optional for most ops; required for 'trash')"
         },
         mailbox: {
           type: "string",
@@ -140,6 +140,14 @@ const CONTACTS_TOOL: Tool = {
         bcc: {
           type: "string",
           description: "BCC email address (optional for send operation)"
+        },
+        trashSubject: {
+          type: "string",
+          description: "Exact subject of the email to trash (required for trash operation)"
+        },
+        trashSender: {
+          type: "string",
+          description: "Sender (name or email) of the email to trash — matched as 'contains' (required for trash operation)"
         }
       },
       required: ["operation"]
@@ -210,8 +218,8 @@ const CALENDAR_TOOL: Tool = {
     properties: {
       operation: {
         type: "string",
-        description: "Operation to perform: 'search', 'open', 'list', or 'create'",
-        enum: ["search", "open", "list", "create"]
+        description: "Operation to perform: 'search', 'open', 'list', 'create', or 'calendars'",
+        enum: ["search", "open", "list", "create", "calendars"]
       },
       searchText: {
         type: "string",
@@ -231,7 +239,7 @@ const CALENDAR_TOOL: Tool = {
       },
       toDate: {
         type: "string",
-        description: "End date for search range in ISO format (optional, default is 30 days from now for search, 7 days for list)"
+        description: "End date for search range in ISO format (optional, default is 4 weeks from today)"
       },
       title: {
         type: "string",

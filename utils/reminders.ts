@@ -1,5 +1,6 @@
 import { runAppleScript } from "run-applescript";
-import { escapeAppleScriptString, validateName } from "./applescript-escape";
+import { escapeAppleScriptString, validateName } from "./applescript-escape.js";
+import { ensureAppRunning } from "./app-launcher.js";
 
 // Configuration
 const CONFIG = {
@@ -56,6 +57,7 @@ end tell`;
  */
 async function requestRemindersAccess(): Promise<{ hasAccess: boolean; message: string }> {
 	try {
+		await ensureAppRunning("Reminders", "return name");
 		// First check if we already have access
 		const hasAccess = await checkRemindersAccess();
 		if (hasAccess) {

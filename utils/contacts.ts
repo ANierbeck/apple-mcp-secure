@@ -1,5 +1,6 @@
 import { runAppleScript } from "run-applescript";
-import { escapeAppleScriptString, sanitizeSearchTerm, validatePhoneNumber } from "./applescript-escape";
+import { escapeAppleScriptString, sanitizeSearchTerm, validatePhoneNumber } from "./applescript-escape.js";
+import { ensureAppRunning } from "./app-launcher.js";
 
 // Configuration
 const CONFIG = {
@@ -29,6 +30,7 @@ end tell`;
 
 async function requestContactsAccess(): Promise<{ hasAccess: boolean; message: string }> {
 	try {
+		await ensureAppRunning("Contacts", "return name");
 		// First check if we already have access
 		const hasAccess = await checkContactsAccess();
 		if (hasAccess) {

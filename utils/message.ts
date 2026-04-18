@@ -1,7 +1,8 @@
 import {runAppleScript} from 'run-applescript';
 import { Database } from 'bun:sqlite';
 import { access } from 'node:fs/promises';
-import { escapeAppleScriptString, validatePhoneNumber } from './applescript-escape';
+import { escapeAppleScriptString, validatePhoneNumber } from './applescript-escape.js';
+import { ensureAppRunning } from './app-launcher.js';
 
 // Configuration
 const CONFIG = {
@@ -48,6 +49,7 @@ function normalizePhoneNumber(phone: string): string[] {
 }
 
 async function sendMessage(phoneNumber: string, message: string) {
+    await ensureAppRunning("Messages", "return name");
     const validatedPhone = validatePhoneNumber(phoneNumber);
     const escapedPhone = escapeAppleScriptString(validatedPhone);
     const escapedMessage = escapeAppleScriptString(message);

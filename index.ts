@@ -5,7 +5,6 @@ import {
 	CallToolRequestSchema,
 	ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { runAppleScript } from "run-applescript";
 import tools from "./tools";
 import { assertSendAllowed, SendNotAllowedError } from "./utils/send-guard";
 
@@ -556,143 +555,17 @@ function initServer() {
 
 						switch (args.operation) {
 							case "unread": {
-								// If an account is specified, we'll try to search specifically in that account
-								let emails;
 								if (args.account) {
 									console.error(
 										`Getting unread emails for account: ${args.account}`,
 									);
-									// Use AppleScript to get unread emails from specific account
-									const script = `
-tell application "Mail"
-    set resultList to {}
-    try
-        set targetAccount to first account whose name is "${args.account.replace(/"/g, '\\"')}"
-
-        -- Get mailboxes for this account
-        set acctMailboxes to every mailbox of targetAccount
-
-        -- If mailbox is specified, only search in that mailbox
-        set mailboxesToSearch to acctMailboxes
-        ${
-					args.mailbox
-						? `
-        set mailboxesToSearch to {}
-        repeat with mb in acctMailboxes
-            if name of mb is "${args.mailbox.replace(/"/g, '\\"')}" then
-                set mailboxesToSearch to {mb}
-                exit repeat
-            end if
-        end repeat
-        `
-						: ""
-				}
-
-        -- Search specified mailboxes
-        repeat with mb in mailboxesToSearch
-            try
-                set unreadMessages to (messages of mb whose read status is false)
-                if (count of unreadMessages) > 0 then
-                    set msgLimit to ${args.limit || 10}
-                    if (count of unreadMessages) < msgLimit then
-                        set msgLimit to (count of unreadMessages)
-                    end if
-
-                    repeat with i from 1 to msgLimit
-                        try
-                            set currentMsg to item i of unreadMessages
-                            set msgData to {subject:(subject of currentMsg), sender:(sender of currentMsg), ¬
-                                        date:(date sent of currentMsg) as string, mailbox:(name of mb)}
-
-                            -- Try to get content if possible
-                            try
-                                set msgContent to content of currentMsg
-                                if length of msgContent > 500 then
-                                    set msgContent to (text 1 thru 500 of msgContent) & "..."
-                                end if
-                                set msgData to msgData & {content:msgContent}
-                            on error
-                                set msgData to msgData & {content:"[Content not available]"}
-                            end try
-
-                            set end of resultList to msgData
-                        on error
-                            -- Skip problematic messages
-                        end try
-                    end repeat
-
-                    if (count of resultList) ≥ ${args.limit || 10} then exit repeat
-                end if
-            on error
-                -- Skip problematic mailboxes
-            end try
-        end repeat
-    on error errMsg
-        return "Error: " & errMsg
-    end try
-
-    return resultList
-end tell`;
-
-									try {
-										const asResult = await runAppleScript(script);
-										if (asResult && asResult.startsWith("Error:")) {
-											throw new Error(asResult);
-										}
-
-										// Parse the results - similar to general getUnreadMails
-										const emailData = [];
-										const matches = asResult.match(/\{([^}]+)\}/g);
-										if (matches && matches.length > 0) {
-											for (const match of matches) {
-												try {
-													const props = match
-														.substring(1, match.length - 1)
-														.split(",");
-													const email: any = {};
-
-													props.forEach((prop) => {
-														const parts = prop.split(":");
-														if (parts.length >= 2) {
-															const key = parts[0].trim();
-															const value = parts.slice(1).join(":").trim();
-															email[key] = value;
-														}
-													});
-
-													if (email.subject || email.sender) {
-														emailData.push({
-															subject: email.subject || "No subject",
-															sender: email.sender || "Unknown sender",
-															dateSent: email.date || new Date().toString(),
-															content:
-																email.content || "[Content not available]",
-															isRead: false,
-															mailbox: `${args.account} - ${email.mailbox || "Unknown"}`,
-														});
-													}
-												} catch (parseError) {
-													console.error(
-														"Error parsing email match:",
-														parseError,
-													);
-												}
-											}
-										}
-
-										emails = emailData;
-									} catch (error) {
-										console.error(
-											"Error getting account-specific emails:",
-											error,
-										);
-										// Fallback to general method if specific account fails
-										emails = await mailModule.getUnreadMails(args.limit);
-									}
-								} else {
-									// No account specified, use the general method
-									emails = await mailModule.getUnreadMails(args.limit);
 								}
+								// getUnreadMails handles account filtering, whitelist, and
+								// safe string-delimited parsing — no inline AppleScript needed.
+								const emails = await mailModule.getUnreadMails(
+									args.limit,
+									args.account,
+								);
 
 								const emailSummary = emails.length > 0
 									? `Found ${emails.length} unread email(s)${args.account ? ` in account "${args.account}"` : ""}${args.mailbox ? ` and mailbox "${args.mailbox}"` : ""}:\n\n` +
@@ -731,7 +604,7 @@ end tell`;
 										emails
 											.map(
 												(email: any) =>
-													`[${email.dateSent}] From: ${email.sender}\nMailbox: ${email.mailbox}\nSubject: ${email.subject}\n${email.content.substring(0, 200)}${email.content.length > 200 ? "..." : ""}`,
+													`[${email.dateSent}] From: ${email.sender}\nMailbox: ${email.mailbox}\nSubject: ${email.subject}\n${email.content}`,
 											)
 											.join("\n\n")
 									: `No emails found for "${args.searchTerm}"${args.account ? ` in account "${args.account}"` : ""}${args.mailbox ? ` and mailbox "${args.mailbox}"` : ""}`;
@@ -852,6 +725,40 @@ end tell`;
 												: latestSummary,
 										},
 									],
+									isError: false,
+								};
+							}
+
+							case "trash": {
+								if (!args.account || !args.trashSubject || !args.trashSender) {
+									throw new Error(
+										"account, trashSubject, and trashSender are required for trash operation",
+									);
+								}
+								const trashResult = await mailModule.trashMail(
+									args.account,
+									args.trashSubject,
+									args.trashSender,
+								);
+								return {
+									content: [{ type: "text", text: trashResult }],
+									isError: false,
+								};
+							}
+
+							case "markRead": {
+								if (!args.account || !args.trashSubject || !args.trashSender) {
+									throw new Error(
+										"account, trashSubject, and trashSender are required for markRead operation",
+									);
+								}
+								const markResult = await mailModule.markAsRead(
+									args.account,
+									args.trashSubject,
+									args.trashSender,
+								);
+								return {
+									content: [{ type: "text", text: markResult }],
 									isError: false,
 								};
 							}
@@ -1112,6 +1019,33 @@ end tell`;
 										},
 									],
 									isError: !result.success,
+								};
+							}
+
+							case "calendars": {
+								const cals = await calendarModule.listCalendars();
+								const lines = cals.map((c) => {
+									const countStr =
+										c.eventCount === -1
+											? "timeout — too slow, consider blocking"
+											: `${c.eventCount} events in next 4 weeks`;
+									const prefix = !c.allowed ? "✗" : c.eventCount === -1 ? "⚠" : "✓";
+									const suffix = c.allowed ? "" : " [blocked/filtered]";
+									return `${prefix} ${c.name} (${countStr})${suffix}`;
+								});
+								return {
+									content: [
+										{
+											type: "text",
+											text:
+												cals.length > 0
+													? `Available calendars:\n\n${lines.join("\n")}\n\n` +
+													  `To exclude large calendars, set APPLE_MCP_CALENDAR_BLOCKLIST="Name1,Name2" in your MCP config.\n` +
+													  `To only query specific calendars, set APPLE_MCP_CALENDAR_ALLOWLIST="Name1,Name2".`
+													: "No calendars found.",
+										},
+									],
+									isError: false,
 								};
 							}
 
@@ -1448,7 +1382,7 @@ function isMessagesArgs(args: unknown): args is {
 }
 
 function isMailArgs(args: unknown): args is {
-	operation: "unread" | "search" | "send" | "mailboxes" | "accounts" | "latest";
+	operation: "unread" | "search" | "send" | "mailboxes" | "accounts" | "latest" | "trash" | "markRead";
 	account?: string;
 	mailbox?: string;
 	limit?: number;
@@ -1458,6 +1392,8 @@ function isMailArgs(args: unknown): args is {
 	body?: string;
 	cc?: string;
 	bcc?: string;
+	trashSubject?: string;
+	trashSender?: string;
 } {
 	if (typeof args !== "object" || args === null) return false;
 
@@ -1472,11 +1408,13 @@ function isMailArgs(args: unknown): args is {
 		body,
 		cc,
 		bcc,
+		trashSubject,
+		trashSender,
 	} = args as any;
 
 	if (
 		!operation ||
-		!["unread", "search", "send", "mailboxes", "accounts", "latest"].includes(
+		!["unread", "search", "send", "mailboxes", "accounts", "latest", "trash", "markRead"].includes(
 			operation,
 		)
 	) {
@@ -1499,6 +1437,12 @@ function isMailArgs(args: unknown): args is {
 			)
 				return false;
 			break;
+		case "trash":
+		case "markRead":
+			if (!account || typeof account !== "string") return false;
+			if (!trashSubject || typeof trashSubject !== "string") return false;
+			if (!trashSender || typeof trashSender !== "string") return false;
+			break;
 		case "unread":
 		case "mailboxes":
 		case "accounts":
@@ -1513,6 +1457,8 @@ function isMailArgs(args: unknown): args is {
 	if (limit && typeof limit !== "number") return false;
 	if (cc && typeof cc !== "string") return false;
 	if (bcc && typeof bcc !== "string") return false;
+	if (trashSubject && typeof trashSubject !== "string") return false;
+	if (trashSender && typeof trashSender !== "string") return false;
 
 	return true;
 }

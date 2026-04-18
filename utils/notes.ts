@@ -1,6 +1,7 @@
 import { runAppleScript } from "run-applescript";
 import { randomBytes } from "node:crypto";
-import { escapeAppleScriptString, sanitizeSearchTerm, validateName } from "./applescript-escape";
+import { escapeAppleScriptString, sanitizeSearchTerm, validateName } from "./applescript-escape.js";
+import { ensureAppRunning } from "./app-launcher.js";
 
 // Configuration
 const CONFIG = {
@@ -52,6 +53,7 @@ end tell`;
  */
 async function requestNotesAccess(): Promise<{ hasAccess: boolean; message: string }> {
 	try {
+		await ensureAppRunning("Notes", "return name");
 		// First check if we already have access
 		const hasAccess = await checkNotesAccess();
 		if (hasAccess) {

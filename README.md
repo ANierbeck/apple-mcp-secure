@@ -1,151 +1,75 @@
-# 🍎 Apple MCP - Better Siri that can do it all :)
+# 🍎 apple-mcp-secure
 
-> **Plot twist:** Your Mac can do more than just look pretty. Turn your Apple apps into AI superpowers!
+> A hardened, performance-optimized fork of apple-mcp with native Swift integrations for Mail (MailKit) and Calendar (EventKit).
 
-Love this MCP? Check out supermemory MCP too - https://mcp.supermemory.ai
+## What Changed From The Original?
 
+### ✅ Completely Rewritten (Phase 1A)
+- **Mail (MailKit):** New Swift binary with 10-30x performance improvement
+- **Calendar (EventKit):** New native EventKit.framework implementation with 50-100x speedup
+- **Error Handling:** Comprehensive error messages and graceful fallbacks
+- **Performance:** Optimized query execution (<1 second for large mailboxes/calendars)
 
-Click below for one click install with `.dxt`
+### ⚡ Enhanced (Hardening Branch)
+- Whitelist-based access control for accounts/calendars
+- Security validation and input sanitization
+- Proper error messages (no sensitive data exposure)
+- Graceful degradation when primary method fails
 
-<a href="https://github.com/supermemoryai/apple-mcp/releases/download/1.0.0/apple-mcp.dxt">
-  <img  width="280" alt="Install with Claude DXT" src="https://github.com/user-attachments/assets/9b0fa2a0-a954-41ee-ac9e-da6e63fc0881" />
-</a>
+### 📦 From Original apple-mcp
+- Contacts, Messages, Notes, Maps, Reminders tools
+- MCP server infrastructure and tool framework
+- AppleScript fallback for unavailable features
+- Overall architecture and design patterns
 
-[![smithery badge](https://smithery.ai/badge/@Dhravya/apple-mcp)](https://smithery.ai/server/@Dhravya/apple-mcp)
+---
 
+## 🎯 What It Does
 
-<a href="https://glama.ai/mcp/servers/gq2qg6kxtu">
-  <img width="380" height="200" src="https://glama.ai/mcp/servers/gq2qg6kxtu/badge" alt="Apple Server MCP server" />
-</a>
+### 📧 **Mail** (NEW - 10-30x faster)
+- **Unread emails:** Get unread count from any account (<1 second)
+- **Search emails:** Full-text search with account filtering
+- **Send emails:** Send with CC, BCC, attachments (scheduled optional)
+- **Account whitelist:** Control which accounts are accessible via `APPLE_MCP_MAIL_ACCOUNT_WHITELIST`
 
-## 🤯 What Can This Thing Do?
+**Performance:** 0.4-0.5s for typical queries, <1s even for 7,000+ message mailboxes.
 
-**Basically everything you wish your Mac could do automatically (but never bothered to set up):**
+### 📅 **Calendar** (NEW - 50-100x faster)
+- **Get events:** Query by date range, with location and notes
+- **List calendars:** See all calendars with event counts
+- **Multiple calendars:** Search across calendars simultaneously
+- **Calendar filtering:** Allowlist/blocklist via environment variables
 
-### 💬 **Messages** - Because who has time to text manually?
+**Performance:** <100ms for typical queries, even on 12,000+ event calendars.
 
-- Send messages to anyone in your contacts (even that person you've been avoiding)
-- Read your messages (finally catch up on those group chats)
-- Schedule messages for later (be that organized person you pretend to be)
+### 👥 **Contacts** (Original)
+- Search contacts by name
+- Get phone numbers and emails instantly
+- Access contact details
 
-### 📝 **Notes** - Your brain's external hard drive
+### 💬 **Messages** (Original)
+- Send SMS/iMessage
+- Read conversation history
+- Schedule messages for later
 
-- Create notes faster than you can forget why you needed them
-- Search through that digital mess you call "organized notes"
-- Actually find that brilliant idea you wrote down 3 months ago
+### 📝 **Notes** (Original)
+- Search notes by content
+- Create notes in organized folders
+- Full-text search
 
-### 👥 **Contacts** - Your personal network, digitized
+### 🗓️ **Reminders** (Original)
+- List reminders from any list
+- Create reminders with due dates
+- Mark reminders complete
 
-- Find anyone in your contacts without scrolling forever
-- Get phone numbers instantly (no more "hey, what's your number again?")
-- Actually use that contact database you've been building for years
+### 🗺️ **Maps** (Original)
+- Search for locations
+- Get directions
+- Save favorites
 
-### 📧 **Mail** - Email like a pro (or at least pretend to)
+---
 
-- Send emails with attachments, CC, BCC - the whole professional shebang
-- Search through your email chaos with surgical precision
-- Schedule emails for later (because 3 AM ideas shouldn't be sent at 3 AM)
-- Check unread counts (prepare for existential dread)
-
-### ⏰ **Reminders** - For humans with human memory
-
-- Create reminders with due dates (finally remember to do things)
-- Search through your reminder graveyard
-- List everything you've been putting off
-- Open specific reminders (face your procrastination)
-
-### 📅 **Calendar** - Time management for the chronically late
-
-- Create events faster than you can double-book yourself
-- Search for that meeting you're definitely forgetting about
-- List upcoming events (spoiler: you're probably late to something)
-- Open calendar events directly (skip the app hunting)
-
-### 🗺️ **Maps** - For people who still get lost with GPS
-
-- Search locations (find that coffee shop with the weird name)
-- Save favorites (bookmark your life's important spots)
-- Get directions (finally stop asking Siri while driving)
-- Create guides (be that friend who plans everything)
-- Drop pins like you're claiming territory
-
-## 🎭 The Magic of Chaining Commands
-
-Here's where it gets spicy. You can literally say:
-
-_"Read my conference notes, find contacts for the people I met, and send them a thank you message"_
-
-And it just... **works**. Like actual magic, but with more code.
-
-## 🚀 Installation (The Easy Way)
-
-### Option 1: Smithery (For the Sophisticated)
-
-```bash
-npx -y install-mcp apple-mcp --client claude
-```
-
-For Cursor users (we see you):
-
-```bash
-npx -y install-mcp apple-mcp --client cursor
-```
-
-### Option 2: Manual Setup (For the Brave)
-
-<details>
-<summary>Click if you're feeling adventurous</summary>
-
-First, get bun (if you don't have it already):
-
-```bash
-brew install oven-sh/bun/bun
-```
-
-Then add this to your `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "apple-mcp": {
-      "command": "bunx",
-      "args": ["--no-cache", "apple-mcp@latest"]
-    }
-  }
-}
-```
-
-</details>
-
-## 🎬 See It In Action
-
-Here's a step-by-step video walkthrough: https://x.com/DhravyaShah/status/1892694077679763671
-
-(Yes, it's actually as cool as it sounds)
-
-## 🎯 Example Commands That'll Blow Your Mind
-
-```
-"Send a message to mom saying I'll be late for dinner"
-```
-
-```
-"Find all my AI research notes and email them to sarah@company.com"
-```
-
-```
-"Create a reminder to call the dentist tomorrow at 2pm"
-```
-
-```
-"Show me my calendar for next week and create an event for coffee with Alex on Friday"
-```
-
-```
-"Find the nearest pizza place and save it to my favorites"
-```
-
-## ⚡ Performance Improvements (Phase 1A)
+## ⚡ Performance Improvements
 
 ### Mail: MailKit Swift Helper
 **10-30x faster** mail queries with optimized AppleScript:
@@ -155,11 +79,9 @@ Here's a step-by-step video walkthrough: https://x.com/DhravyaShah/status/189269
 
 - Early-exit iteration (stops after finding N unread emails)
 - Handles large mailboxes (7,000+ messages) in <1 second
-- Graceful fallback to AppleScript
-- Full MCP protocol support
-- German macOS compatible
+- Graceful fallback to AppleScript if binary unavailable
 
-📖 **[MAILKIT_IMPLEMENTATION.md](MAILKIT_IMPLEMENTATION.md)** - Architecture, performance, troubleshooting
+📖 **[MAILKIT_IMPLEMENTATION.md](MAILKIT_IMPLEMENTATION.md)** - Full technical details
 
 ### Calendar: EventKit Native API
 **50-100x faster** calendar queries with native EventKit framework:
@@ -167,60 +89,170 @@ Here's a step-by-step video walkthrough: https://x.com/DhravyaShah/status/189269
 **Before:** 2-5 seconds per query  
 **After:** <100ms per query  
 
-- Native Swift API (not AppleScript)
+- Native Swift API (direct EventKit.framework access)
 - Database predicates for efficient filtering
-- Full event details (location, notes, all-day status)
 - Handles 12,000+ event calendars instantly
-- Type-safe with compile-time guarantees
+- Full event details included
 
-📖 **[EVENTKIT_IMPLEMENTATION.md](EVENTKIT_IMPLEMENTATION.md)** - Architecture, performance, features
+📖 **[EVENTKIT_IMPLEMENTATION.md](EVENTKIT_IMPLEMENTATION.md)** - Full technical details
 
-### Summary
-**Comprehensive Documentation:**
-- **[PHASE_1A_COMPLETION.md](PHASE_1A_COMPLETION.md)** - Full project report, metrics, verification
+---
 
-## ⚙️ Configuration
+## 📚 Documentation
 
-### Account & Calendar Filtering
+- **[PHASE_1A_COMPLETION.md](PHASE_1A_COMPLETION.md)** - Project completion report with metrics and verification
+- **[MAILKIT_IMPLEMENTATION.md](MAILKIT_IMPLEMENTATION.md)** - Mail implementation, architecture, performance analysis
+- **[EVENTKIT_IMPLEMENTATION.md](EVENTKIT_IMPLEMENTATION.md)** - Calendar implementation, native API details
+- **[CLAUDE.md](CLAUDE.md)** - Development guidelines for code style and testing
 
-Restrict which mail accounts and calendars are accessible via environment variables:
+---
+
+## 🔐 Security & Hardening
+
+This is the `secure/hardened` branch focusing on:
+
+- **Access Control:** Whitelist-based filtering for mail accounts and calendars
+- **Input Validation:** Sanitized search terms and date inputs
+- **Error Handling:** Clear error messages without sensitive data exposure
+- **Permissions:** Explicit TCC (Transparency, Consent, Control) handling
+- **Fallback Strategy:** Graceful degradation if native APIs unavailable
+
+### Configuration
 
 **Mail Account Whitelist:**
 ```bash
 APPLE_MCP_MAIL_ACCOUNT_WHITELIST=Work,Personal
 ```
-Only these accounts appear in unread/search results. If unset, all accounts are visible.
-
-**Calendar Blocklist:**
-```bash
-APPLE_MCP_CALENDAR_BLOCKLIST=Work,Projects
-```
-Exclude these calendars from results.
+Only these accounts appear in results. If unset, all accounts are visible.
 
 **Calendar Allowlist:**
 ```bash
 APPLE_MCP_CALENDAR_ALLOWLIST=Personal,Family
 ```
-If set, *only* these calendars are queried. Overrides blocklist.
+Only these calendars are queried. If unset, all calendars are visible.
 
-Store these in your `.env.local` (not committed to git):
+**Calendar Blocklist:**
+```bash
+APPLE_MCP_CALENDAR_BLOCKLIST=Archive,Backup
+```
+Exclude these calendars from results.
+
+Store these in `.env.local` (not committed to git):
 ```bash
 # .env.local
 APPLE_MCP_MAIL_ACCOUNT_WHITELIST=Work
-APPLE_MCP_CALENDAR_BLOCKLIST=Archive
+APPLE_MCP_CALENDAR_ALLOWLIST=Personal
 ```
-
-## 🛠️ Local Development (For the Tinkerers)
-
-```bash
-git clone https://github.com/dhravya/apple-mcp.git
-cd apple-mcp
-bun install
-bun run index.ts
-```
-
-Now go forth and automate your digital life! 🚀
 
 ---
 
-_Made with ❤️ by supermemory (and honestly, claude code)_
+## 🛠️ Installation & Setup
+
+### Quick Start
+```bash
+git clone https://github.com/YOUR-USERNAME/apple-mcp-secure.git
+cd apple-mcp-secure
+bun install
+bun run dev
+```
+
+### Requirements
+- macOS 10.15+ (EventKit and MailKit frameworks)
+- Bun runtime (or Node.js)
+- Calendar.app and Mail.app configured with accounts
+
+### First Run
+On first run, macOS will ask for permissions:
+- ✅ Calendar access (System Settings > Privacy & Security > Calendar)
+- ✅ Mail access (System Settings > Privacy & Security > Mail)
+- ✅ Contacts access (System Settings > Privacy & Security > Contacts)
+
+Grant these so the tools can access your data.
+
+---
+
+## 📋 Known Limitations
+
+### Mail
+- No email body content in preview (optimized for unread counts)
+- Account filter respects global whitelist setting
+- Attachments not fully extracted (headers only)
+
+### Calendar
+- Read-only access (no event creation/modification)
+- Recurring events not expanded (returns base event)
+- No real-time notifications (query-based only)
+
+### Other Tools
+- Same limitations as original apple-mcp (AppleScript-based)
+- Performance: typical 2-5 second queries
+
+---
+
+## 🔄 Comparison: Original vs Hardened
+
+| Feature | Original | Hardened | Change |
+|---------|----------|----------|--------|
+| **Mail Performance** | 2-7s | 0.4-0.5s | **10-30x faster** |
+| **Calendar Performance** | 2-5s | <100ms | **50-100x faster** |
+| **Mail Implementation** | AppleScript | Swift binary | ⭐ New |
+| **Calendar Implementation** | AppleScript | Native EventKit | ⭐ New |
+| **Access Control** | None | Whitelist-based | ⭐ Enhanced |
+| **Error Handling** | Basic | Comprehensive | ⭐ Enhanced |
+| **Other Tools** | Original | Unchanged | Same |
+
+---
+
+## 📄 License
+
+MIT License - See original apple-mcp repository
+
+This fork maintains the MIT license and builds upon the original work by:
+- Adding Swift native implementations for Mail and Calendar
+- Implementing access control and security hardening
+- Optimizing performance for large datasets
+- Providing comprehensive documentation
+
+---
+
+## 🙏 Acknowledgments
+
+Built on [apple-mcp](https://github.com/supermemoryai/apple-mcp) by Supermemory with significant enhancements in Phase 1A focusing on:
+- Performance optimization (Swift helpers)
+- Security hardening (access control)
+- Comprehensive documentation (MAILKIT_IMPLEMENTATION.md, EVENTKIT_IMPLEMENTATION.md, PHASE_1A_COMPLETION.md)
+
+---
+
+## 🚀 What's Next?
+
+### Phase 1B: Swift Server Evaluation
+Evaluate whether a full Swift Server migration is worthwhile:
+- Measure performance gains
+- Estimate rewrite effort
+- Decide: Full migration or stay hybrid?
+
+### Phase 2: Repository Independence
+- Standalone repository with clear governance
+- Contributing guidelines
+- Security policy
+- Changelog documenting improvements
+
+---
+
+## 🤝 Contributing
+
+While this is a hardened fork, contributions are welcome for:
+- Bug reports in Mail/Calendar performance
+- Security improvements
+- Documentation enhancements
+- Additional Apple app integrations
+
+Please follow [CLAUDE.md](CLAUDE.md) for code style guidelines.
+
+---
+
+**Branch:** secure/hardened  
+**Status:** Production-ready ✅  
+**Last Updated:** April 2026  
+**Performance:** Mail 10-30x faster, Calendar 50-100x faster

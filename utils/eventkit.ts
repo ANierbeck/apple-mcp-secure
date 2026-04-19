@@ -98,6 +98,18 @@ async function callEventKit(args: string[]): Promise<EventKitResponse> {
 			throw new Error("EventKit query timeout (>15s)");
 		}
 
+		// When the binary exits with a non-zero code (e.g. access_denied),
+		// execFileAsync throws but stdout is still available on the error object.
+		// Parse it so the caller's success/error checks work correctly.
+		const stdout = (error as NodeJS.ErrnoException & { stdout?: string })?.stdout;
+		if (stdout) {
+			try {
+				return JSON.parse(stdout) as EventKitResponse;
+			} catch {
+				// Not valid JSON — fall through to generic rethrow
+			}
+		}
+
 		throw error;
 	}
 }

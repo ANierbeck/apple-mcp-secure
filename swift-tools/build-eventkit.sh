@@ -1,8 +1,16 @@
 #!/bin/bash
-set -e
 
+#
+# Copyright (c) 2026 Achim Nierbeck
+#
+# This file is part of apple-mcp-secure.
+# Licensed under the MIT License - see LICENSE file for details.
+#
 # Build script for EventKitHelper
 # Compiles Swift source to binary for current platform
+#
+
+set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"

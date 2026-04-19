@@ -1,5 +1,13 @@
 #!/bin/bash
+
+#
+# Copyright (c) 2026 Achim Nierbeck
+#
+# This file is part of apple-mcp-secure.
+# Licensed under the MIT License - see LICENSE file for details.
+#
 # Build script for MailKit helper binary
+#
 
 set -e
 

@@ -1,5 +1,15 @@
 #!/usr/bin/swift
+
 /**
+ * Copyright (c) 2026 Achim Nierbeck
+ *
+ * This file is part of apple-mcp-secure.
+ * Licensed under the MIT License - see LICENSE file for details.
+ *
+ * MailKit helper for optimized macOS Mail.app access via AppleScript.
+ * Provides 10-30x performance improvement through early-exit iteration strategy.
+ * Handles mailboxes with 7,000+ messages in <1 second.
+ *
  * Mail Helper for apple-mcp - DIRECT MAIL.APP IPC
  *
  * Uses NSAppleEventDescriptor for direct IPC to Mail.app

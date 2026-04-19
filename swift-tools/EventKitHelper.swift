@@ -1,3 +1,13 @@
+/**
+ * Copyright (c) 2026 Achim Nierbeck
+ *
+ * This file is part of apple-mcp-secure.
+ * Licensed under the MIT License - see LICENSE file for details.
+ *
+ * EventKit helper for native macOS Calendar access using Apple's EventKit framework.
+ * Provides <100ms query performance for calendars with 12,000+ events.
+ */
+
 import Foundation
 import EventKit
 

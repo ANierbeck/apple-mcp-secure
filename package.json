@@ -1,14 +1,15 @@
 {
-	"name": "apple-mcp",
-	"version": "1.0.0",
+	"name": "apple-mcp-secure",
+	"version": "0.1.0",
 	"module": "index.ts",
 	"type": "module",
-	"description": "Apple MCP tools for contacts, notes, messages, and mail integration",
-	"author": "Dhravya Shah",
+	"description": "Hardened Apple MCP tools with Swift-powered Mail and Calendar access (10-100x faster)",
+	"author": "Achim Nierbeck <ultimate-surfer@gmx.net>",
 	"license": "MIT",
+	"homepage": "https://github.com/ANierbeck/apple-mcp-secure#readme",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/dhravya/apple-mcp.git"
+		"url": "https://github.com/ANierbeck/apple-mcp-secure.git"
 	},
 	"keywords": [
 		"mcp",

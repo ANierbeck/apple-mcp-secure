@@ -1,3 +1,13 @@
+/**
+ * Copyright (c) 2026 Achim Nierbeck
+ *
+ * This file is part of apple-mcp-secure.
+ * Licensed under the MIT License - see LICENSE file for details.
+ *
+ * Node.js wrapper for EventKit Swift helper binary.
+ * Provides <100ms calendar queries with fallback to AppleScript.
+ */
+
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync } from "node:fs";

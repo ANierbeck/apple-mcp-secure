@@ -1,8 +1,8 @@
 # 🍎 apple-mcp-secure
 
-> **Hardened macOS integration for Claude** with blazing-fast native APIs (EventKit + MailKit) and comprehensive security controls.
+> **An evolution of apple-mcp** - Hardened macOS integration for Claude with blazing-fast native APIs (EventKit + MailKit) and comprehensive security controls.
 
-Originally inspired by apple-mcp, but completely reimplemented with focus on **security**, **performance**, and **native Swift integration**. Now a standalone project with its own roadmap.
+A fork of [apple-mcp](https://github.com/supermemoryai/apple-mcp) that has evolved into **apple-mcp-secure**: Mail and Calendar completely reimplemented with focus on **performance**, **security**, and **native Swift integration**.
 
 ## Architecture
 
@@ -211,15 +211,22 @@ This fork maintains the MIT license and builds upon the original work by:
 
 ---
 
-## 🙏 Origins
+## 🙏 Fork Evolution: apple-mcp → apple-mcp-secure
 
-Originally inspired by [apple-mcp](https://github.com/supermemoryai/apple-mcp) by Supermemory, but completely reimplemented with:
-- **New Mail system:** Swift binary + MailKit optimization (10-30x faster)
-- **New Calendar system:** Native EventKit framework (50-100x faster)
-- **Security-first:** Access control, validation, TCC handling
-- **Comprehensive docs:** MAILKIT_IMPLEMENTATION.md, EVENTKIT_IMPLEMENTATION.md, PHASE_1A_COMPLETION.md
+Started as a fork of [apple-mcp](https://github.com/supermemoryai/apple-mcp) by Supermemory, but has evolved significantly:
 
-Now a **standalone project** with its own roadmap, not a fork. MIT license preserved.
+**What's New (Phase 1A):**
+- **Mail system:** Completely reimplemented with Swift MailKit binary (10-30x faster)
+- **Calendar system:** Completely reimplemented with native EventKit framework (50-100x faster)
+- **Security:** Built-in whitelist access control, input validation, TCC handling
+- **Documentation:** Comprehensive guides (MAILKIT_IMPLEMENTATION.md, EVENTKIT_IMPLEMENTATION.md, PHASE_1A_COMPLETION.md)
+
+**What's Unchanged:**
+- Contacts, Messages, Notes, Maps, Reminders (AppleScript-based from original)
+- MCP server infrastructure and tool framework
+- MIT license (preserved)
+
+**Result:** A fork that has become **its own thing** - apple-mcp-secure is now the "performance & security-hardened" evolution of apple-mcp.
 
 ---
 

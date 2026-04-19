@@ -262,9 +262,11 @@ function initServer() {
 								content: [
 									{
 										type: "text",
-										text: numbers.length
-											? `${args.name}: ${numbers.join(", ")}`
-											: `No contact found for "${args.name}". Try a different name or use no name parameter to list all contacts.`,
+										text: tagExternalContent("Apple Contacts",
+											numbers.length
+												? `${args.name}: ${numbers.join(", ")}`
+												: `No contact found for "${args.name}". Try a different name or use no name parameter to list all contacts.`
+										),
 									},
 								],
 								isError: false,
@@ -293,10 +295,11 @@ function initServer() {
 								content: [
 									{
 										type: "text",
-										text:
+										text: tagExternalContent("Apple Contacts",
 											formattedContacts.length > 0
 												? `Found ${contactCount} contacts:\n\n${formattedContacts.join("\n")}`
-												: "Found contacts but none have phone numbers. Try searching by name to see more details.",
+												: "Found contacts but none have phone numbers. Try searching by name to see more details."
+										),
 									},
 								],
 								isError: false,
@@ -827,7 +830,7 @@ function initServer() {
 									{
 										type: "text",
 										text: result.success
-											? `Opened Reminders app. Found reminder: ${result.reminder?.name}`
+											? tagExternalContent("Apple Reminders", `Opened Reminders app. Found reminder: ${result.reminder?.name}`)
 											: result.message,
 									},
 								],
@@ -917,7 +920,7 @@ function initServer() {
 									content: [
 										{
 											type: "text",
-											text:
+											text: tagExternalContent("Apple Calendar",
 												events.length > 0
 													? `Found ${events.length} events matching "${searchText}":\n\n${events
 															.map(
@@ -926,10 +929,11 @@ function initServer() {
 																	`Location: ${event.location || "Not specified"}\n` +
 																	`Calendar: ${event.calendarName}\n` +
 																	`ID: ${event.id}\n` +
-																	`${event.notes ? `Notes: ${event.notes}\n` : ""}`,
+																	`${event.notes ? `Notes: ${event.notes.slice(0, 500)}${event.notes.length > 500 ? "…" : ""}\n` : ""}`,
 															)
 															.join("\n\n")}`
-													: `No events found matching "${searchText}".`,
+													: `No events found matching "${searchText}".`
+											),
 										},
 									],
 									isError: false,
@@ -972,7 +976,7 @@ function initServer() {
 									content: [
 										{
 											type: "text",
-											text:
+											text: tagExternalContent("Apple Calendar",
 												events.length > 0
 													? `Found ${events.length} events from ${startDateText} to ${endDateText}:\n\n${events
 															.map(
@@ -980,10 +984,12 @@ function initServer() {
 																	`${event.title} (${new Date(event.startDate!).toLocaleString()} - ${new Date(event.endDate!).toLocaleString()})\n` +
 																	`Location: ${event.location || "Not specified"}\n` +
 																	`Calendar: ${event.calendarName}\n` +
-																	`ID: ${event.id}`,
+																	`ID: ${event.id}` +
+																	`${event.notes ? `\nNotes: ${event.notes.slice(0, 500)}${event.notes.length > 500 ? "…" : ""}` : ""}`,
 															)
 															.join("\n\n")}`
-													: `No events found from ${startDateText} to ${endDateText}.`,
+													: `No events found from ${startDateText} to ${endDateText}.`
+											),
 										},
 									],
 									isError: false,
@@ -1084,16 +1090,18 @@ function initServer() {
 									content: [
 										{
 											type: "text",
-											text: result.success
-												? `${result.message}\n\n${result.locations
-														.map(
-															(location) =>
-																`Name: ${location.name}\n` +
-																`Address: ${location.address}\n` +
-																`${location.latitude && location.longitude ? `Coordinates: ${location.latitude}, ${location.longitude}\n` : ""}`,
-														)
-														.join("\n\n")}`
-												: `${result.message}`,
+											text: tagExternalContent("Apple Maps",
+												result.success
+													? `${result.message}\n\n${result.locations
+															.map(
+																(location) =>
+																	`Name: ${location.name}\n` +
+																	`Address: ${location.address}\n` +
+																	`${location.latitude && location.longitude ? `Coordinates: ${location.latitude}, ${location.longitude}\n` : ""}`,
+															)
+															.join("\n\n")}`
+													: `${result.message}`
+											),
 										},
 									],
 									isError: !result.success,

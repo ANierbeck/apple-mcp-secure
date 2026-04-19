@@ -1,22 +1,12 @@
 # Security Hardening Guide
 
-## Why "secure"?
+## Overview
 
-The name isn't marketing. It's a statement about what this project set out to fix.
+Giving an AI agent access to your email, calendar, messages, and contacts is a significant trust boundary. This document describes the measures apple-mcp-secure takes to keep that boundary intact.
 
-The original apple-mcp gave Claude access to Mail, Calendar, Contacts, Messages, Notes, and Reminders — powerful integrations, but built with the assumption that inputs are benign and outputs are safe. In practice, that assumption doesn't hold: email subjects can contain injection attempts, calendar notes can carry adversarial instructions, and phone numbers passed to a SQLite database need to be treated as untrusted input.
+The threat surface here is wider than it first appears. An email subject, a calendar note, or a contact name is not just data to display — in an agentic context, it's content that a model will read and reason about. That content can be crafted. This project treats it accordingly: untrusted until explicitly tagged otherwise, validated before it touches any interpreter, and never allowed to carry internal details back out through error messages.
 
-apple-mcp-secure was built to close those gaps systematically:
-
-- **Inputs to AppleScript are escaped and validated** — search terms, account names, email addresses, and phone numbers are sanitized before they ever reach a script interpreter.
-- **SQL queries use parameterized statements** — the Messages tool reads directly from macOS's `chat.db`; every query uses `?` placeholders, never string interpolation.
-- **Outputs to Claude are wrapped with trust boundary disclaimers** — every tool response containing user-controlled content (emails, calendar events, contacts, messages, notes, map results) is tagged so Claude knows not to treat the content as instructions.
-- **Error messages never leak internals** — account names, file paths, and stack traces stay in the logs, not in responses.
-- **Access is opt-in, not opt-out** — mail accounts and calendars can be whitelisted; sending can be restricted to known recipients.
-
-None of this is exotic. It's the standard defense-in-depth approach applied carefully to a context where the attack surface is real: an AI agent with access to your personal data, reading content from the internet that could be crafted to manipulate it.
-
-That's what the "secure" is for.
+The sections below document each layer of that defense.
 
 ---
 

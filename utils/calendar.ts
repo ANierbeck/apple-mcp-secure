@@ -25,7 +25,7 @@ const CONFIG = {
 	// Per-calendar AppleScript timeout (seconds).
 	// Large exchange calendars with thousands of events will hit this and be
 	// skipped gracefully rather than causing a Beachball of Death.
-	PER_CAL_TIMEOUT: 12,
+	PER_CAL_TIMEOUT: 5,
 };
 
 // ---------------------------------------------------------------------------
@@ -163,12 +163,8 @@ async function listCalendars(): Promise<
 				}));
 		} catch (error) {
 			const msg = error instanceof Error ? error.message : String(error);
-			// access_denied is not recoverable via AppleScript either — propagate
-			if (msg.includes("access_denied") || msg.includes("Calendar access denied")) {
-				throw error;
-			}
 			console.error("[calendar] EventKit failed, falling back to AppleScript:", msg);
-			// Fall through to AppleScript for other errors
+			// Fall through to AppleScript
 		}
 	}
 
@@ -282,12 +278,8 @@ async function getEvents(
 			return events;
 		} catch (error) {
 			const msg = error instanceof Error ? error.message : String(error);
-			// access_denied is not recoverable via AppleScript — propagate immediately
-			if (msg.includes("access_denied") || msg.includes("Calendar access denied")) {
-				throw error;
-			}
 			console.error("[calendar] EventKit failed, falling back to AppleScript:", msg);
-			// Fall through to AppleScript for other errors
+			// Fall through to AppleScript
 		}
 	}
 
@@ -436,12 +428,8 @@ async function searchEvents(
 			return events;
 		} catch (error) {
 			const msg = error instanceof Error ? error.message : String(error);
-			// access_denied is not recoverable via AppleScript — propagate immediately
-			if (msg.includes("access_denied") || msg.includes("Calendar access denied")) {
-				throw error;
-			}
 			console.error("[calendar] EventKit search failed, falling back to AppleScript:", msg);
-			// Fall through to AppleScript for other errors
+			// Fall through to AppleScript
 		}
 	}
 	try {

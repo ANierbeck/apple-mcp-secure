@@ -212,8 +212,23 @@ func main() {
             exit(1)
         }
 
-        // Check authorization
-        guard helper.checkAccess() else {
+        // Request Calendar access via the EventKit framework.
+        // If access was already granted (to this binary or its responsible process),
+        // this returns immediately. If status is notDetermined it triggers the TCC
+        // dialog. If denied it returns false without showing a dialog.
+        // We use a DispatchGroup to bridge the async call into synchronous main().
+        var hasAccess = helper.checkAccess() // fast path: already granted
+        if !hasAccess {
+            let group = DispatchGroup()
+            group.enter()
+            Task {
+                hasAccess = await helper.requestAccess()
+                group.leave()
+            }
+            group.wait()
+        }
+
+        guard hasAccess else {
             let response = EventKitResponse(
                 success: false,
                 calendars: [],

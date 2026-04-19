@@ -162,8 +162,13 @@ async function listCalendars(): Promise<
 					allowed: true,
 				}));
 		} catch (error) {
-			console.error("[calendar] EventKit failed, falling back to AppleScript:", error instanceof Error ? error.message : String(error));
-			// Fall through to AppleScript
+			const msg = error instanceof Error ? error.message : String(error);
+			// access_denied is not recoverable via AppleScript either — propagate
+			if (msg.includes("access_denied") || msg.includes("Calendar access denied")) {
+				throw error;
+			}
+			console.error("[calendar] EventKit failed, falling back to AppleScript:", msg);
+			// Fall through to AppleScript for other errors
 		}
 	}
 
@@ -253,29 +258,36 @@ async function getEvents(
 			const start = fromDate ? new Date(fromDate) : today;
 			const end = toDate ? new Date(toDate) : defaultEnd;
 
-			// Get all calendars to filter
-			const allCals = await listCalendars();
-			const queryCalNames = allCals.filter((c) => c.allowed).map((c) => c.name);
+			// Fetch all events from EventKit and filter client-side.
+			// Avoids a redundant listCalendars() call that would double the AppleScript
+			// overhead if EventKit later fails.
+			const ekEvents = await getEventsViaEventKit(start, end);
 
-			const ekEvents = await getEventsViaEventKit(start, end, queryCalNames);
-
-			// Convert EventKit format to CalendarEvent format
-			const events: CalendarEvent[] = ekEvents.slice(0, limit).map((ek) => ({
-				id: ek.id,
-				title: ek.title,
-				location: ek.location,
-				notes: ek.notes,
-				startDate: ek.startDate,
-				endDate: ek.endDate,
-				calendarName: ek.calendar,
-				isAllDay: ek.isAllDay,
-				url: null, // EventKit doesn't provide URL
-			}));
+			// Convert EventKit format to CalendarEvent format, applying allowlist/blocklist
+			const events: CalendarEvent[] = ekEvents
+				.filter((ek) => isCalendarAllowed(ek.calendar))
+				.slice(0, limit)
+				.map((ek) => ({
+					id: ek.id,
+					title: ek.title,
+					location: ek.location,
+					notes: ek.notes,
+					startDate: ek.startDate,
+					endDate: ek.endDate,
+					calendarName: ek.calendar,
+					isAllDay: ek.isAllDay,
+					url: null, // EventKit doesn't provide URL
+				}));
 
 			return events;
 		} catch (error) {
-			console.error("[calendar] EventKit failed, falling back to AppleScript:", error instanceof Error ? error.message : String(error));
-			// Fall through to AppleScript
+			const msg = error instanceof Error ? error.message : String(error);
+			// access_denied is not recoverable via AppleScript — propagate immediately
+			if (msg.includes("access_denied") || msg.includes("Calendar access denied")) {
+				throw error;
+			}
+			console.error("[calendar] EventKit failed, falling back to AppleScript:", msg);
+			// Fall through to AppleScript for other errors
 		}
 	}
 
@@ -401,29 +413,35 @@ async function searchEvents(
 			const start = fromDate ? new Date(fromDate) : today;
 			const end = toDate ? new Date(toDate) : defaultEnd;
 
-			// Get all calendars to filter
-			const allCals = await listCalendars();
-			const queryCalNames = allCals.filter((c) => c.allowed).map((c) => c.name);
+			// Fetch all matching events from EventKit and filter client-side.
+			// Avoids a redundant listCalendars() call (see getEvents for rationale).
+			const ekEvents = await searchEventsViaEventKit(searchText, start, end);
 
-			const ekEvents = await searchEventsViaEventKit(searchText, start, end, queryCalNames);
-
-			// Convert EventKit format to CalendarEvent format
-			const events: CalendarEvent[] = ekEvents.slice(0, limit).map((ek) => ({
-				id: ek.id,
-				title: ek.title,
-				location: ek.location,
-				notes: ek.notes,
-				startDate: ek.startDate,
-				endDate: ek.endDate,
-				calendarName: ek.calendar,
-				isAllDay: ek.isAllDay,
-				url: null,
-			}));
+			// Convert EventKit format to CalendarEvent format, applying allowlist/blocklist
+			const events: CalendarEvent[] = ekEvents
+				.filter((ek) => isCalendarAllowed(ek.calendar))
+				.slice(0, limit)
+				.map((ek) => ({
+					id: ek.id,
+					title: ek.title,
+					location: ek.location,
+					notes: ek.notes,
+					startDate: ek.startDate,
+					endDate: ek.endDate,
+					calendarName: ek.calendar,
+					isAllDay: ek.isAllDay,
+					url: null,
+				}));
 
 			return events;
 		} catch (error) {
-			console.error("[calendar] EventKit search failed, falling back to AppleScript:", error instanceof Error ? error.message : String(error));
-			// Fall through to AppleScript
+			const msg = error instanceof Error ? error.message : String(error);
+			// access_denied is not recoverable via AppleScript — propagate immediately
+			if (msg.includes("access_denied") || msg.includes("Calendar access denied")) {
+				throw error;
+			}
+			console.error("[calendar] EventKit search failed, falling back to AppleScript:", msg);
+			// Fall through to AppleScript for other errors
 		}
 	}
 	try {

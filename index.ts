@@ -1524,7 +1524,7 @@ function isRemindersArgs(args: unknown): args is {
 
 
 function isCalendarArgs(args: unknown): args is {
-	operation: "search" | "open" | "list" | "create";
+	operation: "search" | "open" | "list" | "create" | "calendars";
 	searchText?: string;
 	eventId?: string;
 	limit?: number;
@@ -1547,7 +1547,7 @@ function isCalendarArgs(args: unknown): args is {
 		return false;
 	}
 
-	if (!["search", "open", "list", "create"].includes(operation)) {
+	if (!["search", "open", "list", "create", "calendars"].includes(operation)) {
 		return false;
 	}
 

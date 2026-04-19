@@ -117,6 +117,13 @@ export async function listCalendarsViaEventKit(
 	const response = await callEventKit(args);
 
 	if (!response.success) {
+		const isAccessDenied = response.errors.some((e) => e.reason.includes("access_denied"));
+		if (isAccessDenied) {
+			throw new Error(
+				"Calendar access denied. Please grant Calendar access to Claude Desktop in " +
+				"System Settings → Privacy & Security → Calendars, then restart Claude Desktop."
+			);
+		}
 		throw new Error(
 			`EventKit error: ${response.errors.map((e) => `${e.calendar}: ${e.reason}`).join(", ")}`
 		);
@@ -142,6 +149,13 @@ export async function getEventsViaEventKit(
 	const response = await callEventKit(args);
 
 	if (!response.success) {
+		const isAccessDenied = response.errors.some((e) => e.reason.includes("access_denied"));
+		if (isAccessDenied) {
+			throw new Error(
+				"Calendar access denied. Please grant Calendar access to Claude Desktop in " +
+				"System Settings → Privacy & Security → Calendars, then restart Claude Desktop."
+			);
+		}
 		throw new Error(
 			`EventKit error: ${response.errors.map((e) => `${e.calendar}: ${e.reason}`).join(", ")}`
 		);
@@ -170,6 +184,13 @@ export async function searchEventsViaEventKit(
 	const response = await callEventKit(args);
 
 	if (!response.success) {
+		const isAccessDenied = response.errors.some((e) => e.reason.includes("access_denied"));
+		if (isAccessDenied) {
+			throw new Error(
+				"Calendar access denied. Please grant Calendar access to Claude Desktop in " +
+				"System Settings → Privacy & Security → Calendars, then restart Claude Desktop."
+			);
+		}
 		throw new Error(
 			`EventKit error: ${response.errors.map((e) => `${e.calendar}: ${e.reason}`).join(", ")}`
 		);

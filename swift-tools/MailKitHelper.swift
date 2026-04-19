@@ -135,8 +135,9 @@ end tell
             // Extract account (after |SNDR_END|)
             let accountStr = String(afterSubj[sndrEndIdx.upperBound...]).trimmingCharacters(in: .whitespaces)
 
-            // Filter by account if specified
-            if let filterAccount = account, accountStr != filterAccount {
+            // Filter by account if specified (case-insensitive)
+            if let filterAccount = account,
+               accountStr.lowercased() != filterAccount.lowercased() {
                 continue
             }
 

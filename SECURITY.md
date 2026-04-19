@@ -315,6 +315,11 @@ Users should be aware that:
 
 This layer of defense is meaningful and recommended — it is not a guarantee.
 
+For operations with real-world consequences (sending emails, sending messages), the
+**Send Whitelist** (Section 4) provides an independent second line of defense: even if
+an injected instruction convinces the model to send a message, the whitelist can prevent
+delivery to any recipient not explicitly permitted.
+
 ---
 
 ## 3. MCP Tool Annotations

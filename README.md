@@ -144,13 +144,15 @@ APPLE_MCP_CALENDAR_ALLOWLIST=Personal
 
 ## 🛠️ Installation & Setup
 
-### Quick Start
+### Quick Start (Ready to Use ✅)
 ```bash
-git clone https://github.com/YOUR-USERNAME/apple-mcp-secure.git
+git clone https://github.com/ANierbeck/apple-mcp-secure.git
 cd apple-mcp-secure
 bun install
 bun run dev
 ```
+
+The MCP server will start and be ready to use with Claude or other MCP clients.
 
 ### Requirements
 - macOS 10.15+ (EventKit and MailKit frameworks)
@@ -230,19 +232,23 @@ Started as a fork of [apple-mcp](https://github.com/supermemoryai/apple-mcp) by 
 
 ---
 
-## 🚀 What's Next?
+## 📊 Project Status
 
-### Phase 1B: Swift Server Evaluation
-Evaluate whether a full Swift Server migration is worthwhile:
-- Measure performance gains
-- Estimate rewrite effort
-- Decide: Full migration or stay hybrid?
+### ✅ Phase 1A: Complete (April 2026)
+- Mail performance: 10-30x improvement
+- Calendar performance: 50-100x improvement
+- Security hardening: 8-layer defense strategy
+- Full documentation and testing
 
-### Phase 2: Repository Independence
-- Standalone repository with clear governance
-- Contributing guidelines
-- Security policy
-- Changelog documenting improvements
+### ✅ Repository Independence: Complete
+- MIT License with Supermemory acknowledgment
+- Contributing guidelines ([CONTRIBUTING.md](CONTRIBUTING.md))
+- Security policy ([SECURITY.md](SECURITY.md))
+- Changelog documenting all Phase 1A improvements ([CHANGELOG.md](CHANGELOG.md))
+
+### ⏭️ Future (Optional)
+- **Phase 1B (Not Scheduled):** Swift Server PoC evaluation - deferred until performance proves insufficient
+- **Ongoing:** Monitor real-world usage, security updates, AppleScript dependency maintenance
 
 ---
 
@@ -258,7 +264,12 @@ Please follow [CLAUDE.md](CLAUDE.md) for code style guidelines.
 
 ---
 
-**Branch:** secure/hardened  
+---
+
+**Repository:** https://github.com/ANierbeck/apple-mcp-secure  
 **Status:** Production-ready ✅  
-**Last Updated:** April 2026  
-**Performance:** Mail 10-30x faster, Calendar 50-100x faster
+**Version:** 0.1.0  
+**License:** MIT  
+**Last Updated:** April 19, 2026  
+**Performance:** Mail 10-30x faster, Calendar 50-100x faster  
+**Documentation:** Complete (8 comprehensive guides)

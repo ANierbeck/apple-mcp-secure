@@ -1,9 +1,11 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const execFileAsync = promisify(execFile);
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /**
  * EventKit helper types (matches Swift binary output)
@@ -40,7 +42,7 @@ function getEventKitBinaryPath(): string | null {
 	const arch = process.arch;
 	const binaryName = arch === "arm64" ? "eventkit-helper-arm64" : "eventkit-helper-intel";
 
-	// Try multiple locations (npm resources, relative to module)
+	// Try multiple locations (npm resources, relative to module, global)
 	const locations = [
 		resolve(__dirname, "..", "resources", binaryName),
 		resolve(process.cwd(), "resources", binaryName),
@@ -49,10 +51,12 @@ function getEventKitBinaryPath(): string | null {
 
 	for (const path of locations) {
 		if (existsSync(path)) {
+			console.log(`[EventKit] Found binary at: ${path}`);
 			return path;
 		}
 	}
 
+	console.log(`[EventKit] Binary not found. Tried: ${locations.join(", ")}`);
 	return null;
 }
 

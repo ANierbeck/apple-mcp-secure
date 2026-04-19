@@ -2,6 +2,7 @@ import { runAppleScript } from "run-applescript";
 import { randomBytes } from "node:crypto";
 import { escapeAppleScriptString, sanitizeSearchTerm, validateEmail, validateName } from "./applescript-escape.js";
 import { ensureAppRunning } from "./app-launcher.js";
+import { getUnreadEmailsViaMailKit, isMailKitAvailable } from "./mailkit.js";
 
 // Configuration
 const CONFIG = {
@@ -40,6 +41,7 @@ interface EmailMessage {
 	content: string;
 	isRead: boolean;
 	mailbox: string;
+	account?: string;
 }
 
 /**
@@ -98,6 +100,35 @@ async function requestMailAccess(): Promise<{ hasAccess: boolean; message: strin
  * case-insensitively) is searched; the global whitelist is still respected.
  */
 async function getUnreadMails(limit = 10, account?: string): Promise<EmailMessage[]> {
+	// Try MailKit first (new, fast)
+	if (isMailKitAvailable()) {
+		try {
+			console.error("[mail] Using MailKit for getUnreadMails (fast path)");
+			const mkEmails = await getUnreadEmailsViaMailKit(account, limit);
+
+			// Filter by allowed accounts and convert to EmailMessage format
+			return mkEmails
+				.filter((email) => isAccountAllowed(email.account))
+				.slice(0, limit)
+				.map((email) => ({
+					subject: email.subject,
+					sender: email.sender,
+					dateSent: email.dateSent,
+					epoch: new Date(email.dateSent).getTime() / 1000,
+					content: email.preview,
+					isRead: email.isRead,
+					mailbox: email.mailbox,
+					account: email.account,
+				}));
+		} catch (error) {
+			console.error(
+				"[mail] MailKit failed, falling back to AppleScript:",
+				error instanceof Error ? error.message : String(error)
+			);
+			// Fall through to AppleScript
+		}
+	}
+
 	try {
 		const accessResult = await requestMailAccess();
 		if (!accessResult.hasAccess) {

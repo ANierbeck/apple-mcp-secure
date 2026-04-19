@@ -22,6 +22,16 @@
 	"bin": {
 		"apple-mcp": "./dist/index.js"
 	},
+	"files": [
+		"dist/",
+		"resources/",
+		"swift-tools/",
+		"utils/",
+		"index.ts",
+		"tools.ts",
+		"README.md",
+		"LICENSE"
+	],
 	"scripts": {
 		"dev": "bun run index.ts",
 		"build": "bun build index.ts --outfile=dist/index.js --target=node --minify",

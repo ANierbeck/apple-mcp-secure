@@ -297,6 +297,24 @@ Without output protection: Claude would see this as instructions.
 With `tagExternalContent()`: Claude sees the disclaimer first and treats the content as
 untrusted data, not as system instructions.
 
+**Limitations:**
+
+This mechanism reduces the risk of prompt injection but does not eliminate it.
+Model behavior in response to adversarial content depends on the model itself — a
+sufficiently crafted payload, a future model update, or a context where the disclaimer
+carries less weight could still result in unintended behavior.
+
+Users should be aware that:
+- No text-based trust boundary is unconditional. A determined attacker who controls
+  content that reaches the model (e.g. via a malicious email or calendar invite) can
+  craft inputs specifically designed to bypass this disclaimer.
+- The disclaimer instructs the model to treat content as untrusted — it does not
+  technically prevent the model from acting on it.
+- Sensitive operations (sending emails, accessing confidential calendars) should always
+  be reviewed by the user before execution, regardless of what the model reports.
+
+This layer of defense is meaningful and recommended — it is not a guarantee.
+
 ---
 
 ## 3. MCP Tool Annotations

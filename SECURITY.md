@@ -183,6 +183,66 @@ export function validateName(input: string, label = 'Name', maxLen = 255): strin
 
 ---
 
+### SQL Injection Prevention (Messages / SQLite)
+
+**Problem:** The Messages tool reads from macOS's `chat.db` SQLite database directly.
+User-supplied phone numbers could be used to inject SQL if interpolated into queries.
+
+**Solution:** All database queries use parameterized prepared statements (`?` placeholders).
+User input is **never** interpolated into SQL strings. Implementation in `utils/message.ts`.
+
+**Phone number validation before querying:**
+```typescript
+// validatePhoneNumber() called first — rejects anything outside digits/+/spaces/dashes
+const validPhone = validatePhoneNumber(phone);
+```
+
+**Parameterized IN clause (never string interpolation):**
+```typescript
+// Build parameterized IN clause — values are bound, never interpolated
+const placeholders = phoneFormats.map(() => '?').join(',');
+
+const stmt = db.prepare<RawMessage, string[]>(`
+    SELECT m.ROWID, m.text, m.date, ...
+    FROM message m
+    INNER JOIN handle h ON m.handle_id = h.ROWID
+    WHERE h.id IN (${placeholders})
+    AND m.is_audio_message = 0
+    ORDER BY m.date DESC
+    LIMIT ?
+`);
+const messages = stmt.all(...phoneFormats, String(limit));
+```
+
+**Parameterized single-value queries:**
+```typescript
+const stmt = db.prepare<{ filename: string }, [number]>(`
+    SELECT filename FROM attachment
+    INNER JOIN message_attachment_join
+    ON attachment.ROWID = message_attachment_join.attachment_id
+    WHERE message_attachment_join.message_id = ?
+`);
+const rows = stmt.all(messageId);
+```
+
+**Pattern enforced throughout:**
+```typescript
+// ❌ NEVER — string interpolation
+const stmt = db.prepare(`SELECT * FROM message WHERE handle_id = '${phone}'`);
+
+// ✅ ALWAYS — parameterized binding
+const stmt = db.prepare(`SELECT * FROM message WHERE handle_id = ?`);
+stmt.all(phone);
+```
+
+**Protected queries:**
+- ✅ Conversation lookup by phone number (`getConversation`)
+- ✅ Unread messages lookup (`getUnreadMessages`)
+- ✅ Attachment lookup by message ID (`getAttachmentPaths`)
+- ✅ All `LIMIT` values bound as parameters, not interpolated
+
+---
+
 ### Output Protection (Prompt Injection from Retrieved Content)
 
 **Problem:** Data retrieved from Apple apps (email bodies, calendar notes, contact names,

@@ -85,7 +85,7 @@ async function callMailKit(args: string[]): Promise<MailKitResponse> {
 
 	try {
 		const { stdout } = await execFileAsync(binaryPath, args, {
-			timeout: 15000,
+			timeout: 45000, // 45s: accounts for multi-account IMAP sync (check for new mail)
 			maxBuffer: 20 * 1024 * 1024, // 20MB for large email lists
 		});
 

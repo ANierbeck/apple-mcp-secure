@@ -54,24 +54,74 @@ struct MailError: Codable {
 // MARK: - Optimized Mail Query
 
 func getUnreadEmails(account: String? = nil, limit: Int = 50) -> MailKitResponse {
-    // Use optimized AppleScript with reasonable timeout (15s for large mailboxes)
+    // Use optimized AppleScript with 30s timeout (extra time for IMAP sync)
     // + focused query (only unread messages, only INBOX mailbox)
     // + early exit (stop after finding limit unread messages)
-    return getUnreadEmailsViaAppleScriptWithTimeout(account: account, limit: limit, timeoutSecs: 15)
+    return getUnreadEmailsViaAppleScriptWithTimeout(account: account, limit: limit, timeoutSecs: 30)
 }
 
 func getUnreadEmailsViaAppleScriptWithTimeout(account: String? = nil, limit: Int = 50, timeoutSecs: Int = 3) -> MailKitResponse {
-    // CRITICAL FIX: Only check specific mailbox names (INBOX, All Mail, etc.)
-    // Don't iterate all 50+ mailboxes - that's what caused the timeout!
+    // Build optional account pre-filter snippet for the AppleScript.
+    // When a specific account is requested we sync only that account (faster).
+    // When no filter is given we sync all accounts.
+    let accountFilter = account ?? ""
+    let accountSetup: String
+    if accountFilter.isEmpty {
+        accountSetup = """
+    -- No account filter — search and sync all accounts
+    set accountsToSearch to accounts
+"""
+    } else {
+        accountSetup = """
+    -- Find the specific account (case-insensitive match by name or email)
+    set requestedAcct to "\(accountFilter)"
+    set accountsToSearch to {}
+    repeat with acct in accounts
+        if (name of acct as text) is equal to requestedAcct then
+            set accountsToSearch to {acct}
+            exit repeat
+        end if
+        try
+            repeat with emailAddr in (email addresses of acct)
+                if (emailAddr as text) is equal to requestedAcct then
+                    set accountsToSearch to {acct}
+                    exit repeat
+                end if
+            end repeat
+        end try
+        if (count of accountsToSearch) > 0 then exit repeat
+    end repeat
+    if (count of accountsToSearch) = 0 then return ""
+"""
+    }
 
     let script = """
 tell application "Mail"
     set unreadMsgs to {}
     set msgCount to 0
-    set limit to \(limit)
+    set msgLimit to \(limit)
 
-    repeat with acct in accounts
+\(accountSetup)
+
+    -- Trigger IMAP sync so the local cache is fresh.
+    -- Without this, IMAP accounts appear to have 0 unread even when the
+    -- server has new messages (the local store is stale until Mail syncs).
+    try
+        repeat with acct in accountsToSearch
+            check for new mail in acct
+        end repeat
+    end try
+
+    -- Query INBOX of each account for unread messages.
+    -- NOTE: We always iterate ALL accounts in accountsToSearch — no early
+    -- exit between accounts. This ensures every account contributes its
+    -- unread emails even if an earlier account (e.g. a blocked account)
+    -- would otherwise fill up the limit first.
+    -- Per-account inner loop still exits early once msgLimit is reached
+    -- within THAT account to avoid scanning thousands of messages per account.
+    repeat with acct in accountsToSearch
         set acctName to name of acct
+        set acctCount to 0
         set inboxMB to missing value
         try
             set inboxMB to mailbox "INBOX" of acct
@@ -85,7 +135,7 @@ tell application "Mail"
             try
                 set allMsgs to messages of inboxMB
                 repeat with i from 1 to length of allMsgs
-                    if msgCount >= limit then
+                    if acctCount >= msgLimit then
                         exit repeat
                     end if
                     set msg to item i of allMsgs
@@ -97,15 +147,13 @@ tell application "Mail"
                             set oneEmail to msgSubject & "|SUBJ_END|" & msgSender & "|SNDR_END|" & acctName & "|EMAIL_END|"
                             set end of unreadMsgs to oneEmail
                             set msgCount to msgCount + 1
+                            set acctCount to acctCount + 1
                         end if
                     end try
                 end repeat
             end try
         end if
-
-        if msgCount >= limit then
-            exit repeat
-        end if
+        -- No global early exit here — always check every account
     end repeat
 
     return unreadMsgs as string

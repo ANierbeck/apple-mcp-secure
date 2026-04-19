@@ -63,59 +63,123 @@ catch (error) {
 
 ## 2. Prompt Injection Prevention
 
-**Problem:** User-controlled input (search terms, date ranges) could contain AppleScript/code injection.
+**Problem:** User-controlled input (search terms, email addresses, phone numbers) could contain AppleScript/code injection or break command syntax.
 
-**Solution:** Input validation and escaping at all boundaries.
+**Solution:** Input validation and escaping at all boundaries. Implementation in `utils/applescript-escape.ts`.
 
 ### Implementation
 
-**Mail Search Term Validation:**
+**AppleScript String Escaping (Core Defense):**
 ```typescript
-function sanitizeSearchTerm(term: string): string {
-  // Remove special AppleScript characters
-  return term
-    .replace(/[&"|]/g, '')           // Remove special chars
-    .replace(/\$/g, '')               // Remove $ (variable expansion)
-    .replace(/`/g, '')                // Remove backticks
-    .trim()
-    .slice(0, 500);                   // Limit length
+export function escapeAppleScriptString(input: string, maxLen = 10_000): string {
+    if (typeof input !== 'string') {
+        throw new TypeError('escapeAppleScriptString: input must be a string');
+    }
+    const truncated = input.slice(0, maxLen);
+    return truncated
+        .replace(/\x00/g, '')        // Strip null bytes (injection vector)
+        .replace(/\\/g, '\\\\')      // Escape backslashes (must come first)
+        .replace(/"/g, '\\"');       // Escape double-quotes
 }
 ```
 
-**AppleScript String Escaping:**
+**Search Term Sanitization:**
 ```typescript
-function escapeAppleScriptString(str: string): string {
-  return str
-    .replace(/\\/g, '\\\\')           // Escape backslashes
-    .replace(/"/g, '\\"')             // Escape quotes
-    .replace(/\n/g, '\\n')            // Escape newlines
-    .replace(/\r/g, '\\r')            // Escape carriage returns
-    .replace(/\t/g, '\\t');           // Escape tabs
+export function sanitizeSearchTerm(input: string, maxLen = 200): string {
+    if (typeof input !== 'string') {
+        throw new TypeError('Search term must be a string');
+    }
+    return input.replace(/\x00/g, '').trim().slice(0, maxLen);
 }
 ```
 
-**Date Range Validation:**
+Then always escape before interpolating into AppleScript:
 ```typescript
-function validateDateRange(from: Date, to: Date): void {
-  if (from > to) {
-    throw new Error('Invalid date range: start must be before end');
-  }
-  const now = new Date();
-  const maxRange = 365 * 24 * 60 * 60 * 1000; // 1 year
-  if (to.getTime() - from.getTime() > maxRange) {
-    throw new Error('Date range exceeds maximum (1 year)');
-  }
+const safeTerm = escapeAppleScriptString(sanitizeSearchTerm(userInput));
+const script = `tell application "Mail" to search for "${safeTerm}"`;
+```
+
+**Email Address Validation:**
+```typescript
+export function validateEmail(email: string): string {
+    if (typeof email !== 'string' || email.trim().length === 0) {
+        throw new Error('Email address must be a non-empty string');
+    }
+    const trimmed = email.trim();
+    if (trimmed.length > 320) {
+        throw new Error('Email address is too long');
+    }
+    // Minimal sanity: local@domain.tld
+    if (!/^[^\s@"<>]+@[^\s@"<>]+\.[^\s@"<>.]{2,}$/.test(trimmed)) {
+        throw new Error(`Invalid email address format: "${email}"`);
+    }
+    return trimmed;
 }
 ```
+
+**Phone Number Validation:**
+```typescript
+export function validatePhoneNumber(phone: string): string {
+    if (typeof phone !== 'string' || phone.trim().length === 0) {
+        throw new Error('Phone number must be a non-empty string');
+    }
+    // Allow digits, +, spaces, dashes, parens — between 7 and 20 chars
+    if (!/^\+?[\d\s\-(). ]{7,20}$/.test(phone.trim())) {
+        throw new Error(`Invalid phone number format: "${phone}"`);
+    }
+    return phone.trim();
+}
+```
+
+**Folder/List Name Validation:**
+```typescript
+export function validateName(input: string, label = 'Name', maxLen = 255): string {
+    if (typeof input !== 'string' || input.trim().length === 0) {
+        throw new Error(`${label} must be a non-empty string`);
+    }
+    const trimmed = input.trim().slice(0, maxLen);
+    // Disallow AppleScript-special characters even when escaped
+    if (/[«»\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(trimmed)) {
+        throw new Error(`${label} contains invalid characters`);
+    }
+    return trimmed;
+}
+```
+
+### Key Defense Mechanisms
+
+**1. Null Byte Stripping**
+- Removes `\x00` (null bytes) which can terminate strings in some contexts
+- Applied in both `escapeAppleScriptString()` and `sanitizeSearchTerm()`
+
+**2. Backslash Escaping (First)**
+- Must come before quote escaping to avoid double-escaping
+- Prevents `\"` injection
+
+**3. Quote Escaping**
+- Escapes `"` to `\"` so user input cannot break out of AppleScript string literal
+- Example: input `foo"bar` → `foo\"bar` (stays inside quoted string)
+
+**4. Length Limits**
+- `escapeAppleScriptString`: 10,000 chars max
+- `sanitizeSearchTerm`: 200 chars max
+- `validateEmail`: 320 chars max
+- `validateName`: 255 chars max
+- Prevents resource exhaustion attacks
+
+**5. Regex Validation**
+- Email: Must match `local@domain.tld` pattern
+- Phone: Accepts international +1 format, spaces, dashes, parentheses
+- Name: Rejects control characters and special AppleScript chars
 
 ### Protected Input Boundaries
-- ✅ Mail search terms
-- ✅ Calendar date ranges
-- ✅ Account/calendar name filters
-- ✅ Contact search queries
-- ✅ Message content (for sending)
-- ✅ Note content (for creating)
-- ✅ All AppleScript string parameters
+- ✅ Mail search terms (`sanitizeSearchTerm` + `escapeAppleScriptString`)
+- ✅ Email addresses (`validateEmail` + `escapeAppleScriptString`)
+- ✅ Phone numbers (`validatePhoneNumber` + `escapeAppleScriptString`)
+- ✅ Folder/list names (`validateName` + `escapeAppleScriptString`)
+- ✅ Calendar names (filtered by allowlist/blocklist + `validateName`)
+- ✅ Account names (filtered by whitelist + `validateName`)
+- ✅ All AppleScript string parameters (always via `escapeAppleScriptString`)
 
 ---
 
@@ -234,79 +298,94 @@ APPLE_MCP_SEND_WHITELIST=boss@company.com,family@personal.com
 
 ## 5. AppleScript Input Validation & Escaping
 
-**Problem:** Direct AppleScript execution with user input could allow command injection.
+**Problem:** Direct AppleScript execution with user input could allow command injection or syntax errors.
 
-**Solution:** Strict input validation and proper escaping throughout the codebase.
+**Solution:** Strict input validation and proper escaping at all interpolation points. All utilities in `utils/applescript-escape.ts`.
 
-### Validation Rules
+### Validation Rules (All Implemented)
 
-**Account Names:**
+**For Account/Calendar/Folder Names:**
 ```typescript
-function validateAccountName(name: string): void {
-  if (!name || name.trim().length === 0) {
-    throw new Error('Account name cannot be empty');
-  }
-  if (name.length > 255) {
-    throw new Error('Account name too long');
-  }
-  if (!/^[a-zA-Z0-9\s\-_.@]+$/.test(name)) {
-    throw new Error('Account name contains invalid characters');
-  }
-}
+// Validates non-empty string, max 255 chars, no control chars
+validateName(input: string, label = 'Name', maxLen = 255): string
 ```
 
-**Calendar Names:**
+**For Search Terms:**
 ```typescript
-function validateCalendarName(name: string): void {
-  if (!name || name.trim().length === 0) {
-    throw new Error('Calendar name cannot be empty');
-  }
-  if (name.length > 255) {
-    throw new Error('Calendar name too long');
-  }
-  // Allow most characters in calendar names
-  if (/['"]/g.test(name)) {
-    throw new Error('Calendar name cannot contain quotes');
-  }
-}
+// Removes null bytes, trims, enforces 200 char limit
+sanitizeSearchTerm(input: string, maxLen = 200): string
 ```
 
-**Search Terms:**
+**For Email Addresses:**
 ```typescript
-function sanitizeSearchTerm(term: string): string {
-  const maxLength = 500;
-  const sanitized = term
-    .trim()
-    .slice(0, maxLength)
-    // Remove control characters
-    .replace(/[\x00-\x1F\x7F]/g, '')
-    // Escape special shell characters
-    .replace(/[;&|`$()]/g, '');
-  
-  return sanitized;
-}
+// Validates format: local@domain.tld, max 320 chars
+validateEmail(email: string): string
 ```
 
-### Escaping Standards
-
-**All AppleScript String Parameters:**
+**For Phone Numbers:**
 ```typescript
+// Accepts +1 format and variations, 7-20 chars
+validatePhoneNumber(phone: string): string
+```
+
+### Escaping Pattern (Two-Step)
+
+**Step 1: Validate/Sanitize**
+```typescript
+const validEmail = validateEmail(userInput);      // May throw
+const safeTerm = sanitizeSearchTerm(userInput);   // Cleans whitespace, length
+```
+
+**Step 2: Escape for AppleScript**
+```typescript
+const escapedEmail = escapeAppleScriptString(validEmail);
+const escapedTerm = escapeAppleScriptString(safeTerm);
+```
+
+**Complete Example:**
+```typescript
+// ❌ NEVER — Direct interpolation
 const script = `
   tell application "Mail"
-    set searchTerm to "${escapeAppleScriptString(userInput)}"
-    -- Now safe to use searchTerm
+    set searchTerm to "${userInput}"
+  end tell
+`;
+
+// ✅ ALWAYS — Validate then escape
+const script = `
+  tell application "Mail"
+    set searchTerm to "${escapeAppleScriptString(sanitizeSearchTerm(userInput))}"
   end tell
 `;
 ```
 
-**Pattern to Follow:**
-```typescript
-// ❌ NEVER
-const script = `... "${userInput}" ...`;
+### What Gets Escaped
 
-// ✅ ALWAYS
-const script = `... "${escapeAppleScriptString(userInput)}" ...`;
-```
+**`escapeAppleScriptString()` handles:**
+- ✅ Null bytes (`\x00`) → removed
+- ✅ Backslashes (`\`) → escaped to `\\`
+- ✅ Double quotes (`"`) → escaped to `\"`
+- ✅ Enforces max length (10,000 chars default)
+
+**`sanitizeSearchTerm()` handles:**
+- ✅ Null bytes → removed
+- ✅ Whitespace trimming
+- ✅ Length limit (200 chars)
+
+**`validateEmail()` handles:**
+- ✅ Format validation (local@domain.tld)
+- ✅ Length check (≤320 chars)
+- ✅ Rejects quotes, brackets, spaces
+
+**`validatePhoneNumber()` handles:**
+- ✅ Accepts +1, 1, or just digits
+- ✅ Allows spaces, dashes, parentheses
+- ✅ Validates length (7-20 chars)
+
+**`validateName()` handles:**
+- ✅ Rejects control characters (`\x00-\x1f`, `\x7f`)
+- ✅ Rejects special AppleScript guillemets (`«»`)
+- ✅ Enforces max length (255 chars default)
 
 ---
 

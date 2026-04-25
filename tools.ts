@@ -92,18 +92,18 @@ const CONTACTS_TOOL: Tool = {
   
   const MAIL_TOOL: Tool = {
     name: "mail",
-    description: "Interact with Apple Mail app - read unread emails, search emails, send emails, and trash emails",
+    description: "Interact with Apple Mail app - read unread emails, search emails, send emails (with user confirmation), and trash emails. Use 'prepare' then 'confirm code=XXXX' for safe sending.",
     annotations: {
       readOnlyHint: false,
-      destructiveHint: true, // 'send' dispatches irreversible emails; 'trash' moves to Trash (recoverable)
+      destructiveHint: true, // 'send' and 'confirm' dispatch irreversible emails; 'trash' moves to Trash (recoverable)
     },
     inputSchema: {
       type: "object",
       properties: {
         operation: {
           type: "string",
-          description: "Operation to perform: 'unread', 'search', 'send', 'reply', 'mailboxes', 'accounts', 'latest', 'trash', or 'markRead'",
-          enum: ["unread", "search", "send", "reply", "mailboxes", "accounts", "latest", "trash", "markRead"]
+          description: "Operation to perform: 'unread', 'search', 'send', 'reply', 'mailboxes', 'accounts', 'latest', 'trash', 'markRead', 'prepare', or 'confirm'",
+          enum: ["unread", "search", "send", "reply", "mailboxes", "accounts", "latest", "trash", "markRead", "prepare", "confirm"]
         },
         account: {
           type: "string",
@@ -156,6 +156,10 @@ const CONTACTS_TOOL: Tool = {
         ref: {
           type: "string",
           description: "Opaque reference to a previously retrieved email (the 'ref' field from unread/search/latest results). Required for 'reply' operation — lets the server resolve the sender address without exposing it to the model."
+        },
+        code: {
+          type: "string",
+          description: "Confirmation code returned by 'prepare' operation (format: XXXX-XXXX). Required for 'confirm' operation."
         }
       },
       required: ["operation"]

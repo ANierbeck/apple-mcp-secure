@@ -1,12 +1,115 @@
 import { runAppleScript } from "run-applescript";
 import { randomBytes, createHash } from "node:crypto";
-import { escapeAppleScriptString, sanitizeSearchTerm, validateEmail, validateName } from "./applescript-escape.js";
+import { escapeAppleScriptString, sanitizeSearchTerm, validateEmail, validateName, truncateSmart } from "./applescript-escape.js";
 import { ensureAppRunning } from "./app-launcher.js";
 import { getUnreadEmailsViaMailKit, isMailKitAvailable } from "./mailkit.js";
 
 // Session-scoped map from opaque ref → {full sender address, subject}.
 // The model only ever sees the ref, never the raw sender address.
 const emailRefMap = new Map<string, { sender: string; subject: string }>();
+
+// Pending email sends for user confirmation workflow
+// Map: confirmationCode → { to, subject, body, cc?, bcc?, expires }
+const pendingSends = new Map<string, { to: string; subject: string; body: string; cc?: string; bcc?: string; expires: number }>();
+
+// Expiration time for pending sends: 5 minutes (in milliseconds)
+const PENDING_SEND_TTL = 5 * 60 * 1000;
+
+/**
+ * Generates a human-readable confirmation code (format: XXXX-XXXX)
+ */
+function generateConfirmCode(): string {
+	const code = randomBytes(4).toString('hex').toUpperCase();
+	return `${code.slice(0, 4)}-${code.slice(4, 8)}`;
+}
+
+/**
+ * Validates a confirmation code and returns the pending email if valid
+ */
+function validateConfirmCode(code: string): { to: string; subject: string; body: string; cc?: string; bcc?: string } | null {
+	const pending = pendingSends.get(code);
+	if (!pending) return null;
+	
+	// Check if code has expired
+	if (pending.expires < Date.now()) {
+		pendingSends.delete(code);
+		return null;
+	}
+	
+	return pending;
+}
+
+/**
+ * Prepares an email for sending, returns confirmation code
+ * User must call confirmMail with the code to actually send
+ */
+async function prepareMail(
+	to: string,
+	subject: string,
+	body: string,
+	cc?: string,
+	bcc?: string,
+): Promise<{ code: string; message: string }> {
+	// Validate inputs
+	if (!to || !to.trim()) {
+		throw new Error("To address is required");
+	}
+	if (!subject || !subject.trim()) {
+		throw new Error("Subject is required");
+	}
+	if (!body || !body.trim()) {
+		throw new Error("Email body is required");
+	}
+	
+	// Validate email addresses
+	const validTo = validateEmail(to);
+	let validCc: string | undefined;
+	let validBcc: string | undefined;
+	
+	if (cc) {
+		validCc = validateEmail(cc);
+	}
+	if (bcc) {
+		validBcc = validateEmail(bcc);
+	}
+	
+	// Generate confirmation code
+	const code = generateConfirmCode();
+	
+	// Store pending send
+	pendingSends.set(code, {
+		to: validTo,
+		subject,
+		body: body.trim(),
+		cc: validCc,
+		bcc: validBcc,
+		expires: Date.now() + PENDING_SEND_TTL,
+	});
+	
+	return {
+		code,
+		message: `Email prepared for sending to ${validTo}. Use 'mail confirm code=${code}' to send.`,
+	};
+}
+
+/**
+ * Confirms and sends a pending email using the confirmation code
+ */
+async function confirmMail(code: string): Promise<string> {
+	const pending = validateConfirmCode(code);
+	
+	if (!pending) {
+		throw new Error(`Invalid or expired confirmation code: ${code}. Email not sent.`);
+	}
+	
+	// Remove from pending before sending
+	pendingSends.delete(code);
+	
+	// Send the email
+	const result = await sendMail(pending.to, pending.subject, pending.body, pending.cc, pending.bcc);
+	
+	return result || `Email sent successfully to ${pending.to}`;
+}
 
 function anonymizeSender(sender: string): string {
 	const nameMatch = sender.match(/^(.+?)\s*<[^>]+>$/);
@@ -28,9 +131,9 @@ const CONFIG = {
 	// Maximum emails to process (to avoid performance issues)
 	MAX_EMAILS: 50,
 	// Maximum content length for unread/latest previews
-	MAX_CONTENT_PREVIEW: 300,
+	MAX_CONTENT_PREVIEW: 1000,
 	// Maximum content length for search results (full content)
-	MAX_SEARCH_CONTENT: 50000,
+	MAX_SEARCH_CONTENT: 10000,
 	// Timeout for operations
 	TIMEOUT_MS: 10000,
 };
@@ -1027,4 +1130,6 @@ export default {
 	trashMail,
 	markAsRead,
 	requestMailAccess,
+	prepareMail,
+	confirmMail,
 };

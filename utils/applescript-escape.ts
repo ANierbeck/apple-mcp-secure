@@ -83,3 +83,58 @@ export function validateName(input: string, label = 'Name', maxLen = 255): strin
     }
     return trimmed;
 }
+
+/**
+ * Truncates text intelligently at sentence boundaries.
+ * Tries to find the last sentence-ending character (.!?) before maxLen,
+ * or falls back to the last newline.
+ * This prevents cutting content in the middle of a sentence.
+ * 
+ * @param text - The text to truncate
+ * @param maxLen - Maximum length of the output (excluding suffix)
+ * @param suffix - Text to append when truncated (default: "...")
+ * @returns Truncated text with suffix, or original if shorter than maxLen
+ */
+export function truncateSmart(text: string, maxLen: number, suffix = "..."): string {
+    if (typeof text !== 'string') {
+        throw new TypeError('truncateSmart: text must be a string');
+    }
+    
+    if (text.length <= maxLen) {
+        return text;
+    }
+    
+    // Minimum length to preserve (ensure at least 50% of maxLen is used)
+    const minKeep = Math.max(50, Math.floor(maxLen * 0.8));
+    
+    // Look for sentence boundaries in the text up to maxLen
+    const searchText = text.slice(0, maxLen + 10); // +10 for buffer
+    
+    // Find the best boundary position
+    let bestPos = -1;
+    const boundaries = [
+        { pos: searchText.lastIndexOf('. '), weight: 3 },
+        { pos: searchText.lastIndexOf('? '), weight: 3 },
+        { pos: searchText.lastIndexOf('! '), weight: 3 },
+        { pos: searchText.lastIndexOf('\n'), weight: 2 },
+        { pos: searchText.lastIndexOf('.'), weight: 2 },
+        { pos: searchText.lastIndexOf('?'), weight: 2 },
+        { pos: searchText.lastIndexOf('!'), weight: 2 },
+    ];
+    
+    // Find the best boundary that's within our acceptable range
+    for (const { pos, weight } of boundaries) {
+        if (pos > minKeep && pos <= maxLen && (bestPos === -1 || pos > bestPos)) {
+            bestPos = pos;
+        }
+    }
+    
+    // If we found a good boundary, use it
+    if (bestPos > -1) {
+        // +1 to include the boundary character
+        return searchText.slice(0, bestPos + 1) + suffix;
+    }
+    
+    // Fallback: hard truncate at maxLen
+    return text.slice(0, maxLen) + suffix;
+}

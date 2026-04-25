@@ -25,12 +25,21 @@ A fork of [apple-mcp](https://github.com/supermemoryai/apple-mcp) that has evolv
 ### 📧 **Mail** (NEW - 10-30x faster)
 - **Unread emails:** Get unread emails from any account (<1 second)
 - **Search emails:** Full-text search with account filtering
-- **Send emails:** Send with CC, BCC (direct address or contact name)
+- **Send emails:** **Two-step confirmation workflow** — use `mail prepare` then `mail confirm code=XXXX` for safe sending. prevents accidental/unauthorized email transmission
+- **Direct send (legacy):** `mail send` with CC, BCC (direct address or contact name) — **not recommended**
 - **Reply:** Reply to retrieved emails via opaque ref — sender address never exposed to AI
 - **Trash / Mark read:** Move emails to Trash or mark as read
 - **Account whitelist:** Control which accounts are accessible via `APPLE_MCP_MAIL_ACCOUNT_WHITELIST`
 
 **Performance:** 0.4-0.5s for typical queries, <1s even for 7,000+ message mailboxes.
+
+**🔒 Security Note:**
+> For maximum security, use the **two-step process**:
+> 1. `mail prepare to="recipient@domain.com" subject="..." body="..."`
+> 2. Server responds with confirmation code (format: `XXXX-XXXX`)
+> 3. `mail confirm code=XXXX-XXXX` to actually send
+> 
+> Codes expire after **5 minutes**. This prevents AI from sending emails without explicit user confirmation.
 
 ### 📅 **Calendar** (NEW - 50-100x faster)
 - **Get events:** Query by date range with location; notes stripped by default for privacy
@@ -163,6 +172,29 @@ calendar details eventId="A1B2C3D4-..."
 ```
 
 This returns the full event including notes, tagged as external content so Claude treats it as untrusted data.
+
+### Intelligent Content Truncation
+
+To balance usability and security, content from emails and other sources is **intelligently truncated** at natural sentence boundaries rather than being cut off mid-sentence.
+
+| Operation | Max Length | Behavior |
+|-----------|------------|----------|
+| `mail unread` | 1,000 chars | Preview only |
+| `mail latest` | 1,000 chars | Preview only |
+| `mail search` | 10,000 chars | Full content (with suffix if truncated) |
+| `calendar list/search` | 500 chars | No notes shown |
+| `calendar details` | Unlimited | Full notes on request |
+
+**Smart truncation rules:**
+- Cuts at the last sentence-ending character (.!?) before the limit
+- Falls back to last newline if no sentence boundary found
+- Appends informative suffix: `[Content truncated. Use details to see full]`
+
+**Example:**
+```
+mail search searchTerm="project"
+# Returns: "The project meeting is scheduled... [Content truncated. Use mail details to see full email]"
+```
 
 ---
 

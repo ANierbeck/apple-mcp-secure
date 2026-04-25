@@ -433,6 +433,78 @@ APPLE_MCP_SEND_WHITELIST=boss@company.com,family@personal.com
 - User takes full responsibility
 - Production setting for trusted environments
 
+**Note:** The whitelist approach is now **augmented** by the two-step confirmation workflow (Section 4.5), which provides stronger protection against accidental or unauthorized sends.
+
+---
+
+## 4.5 User Confirmation Workflow (Two-Step Email Sending)
+
+**Problem:** Static whitelists can be bypassed by too-permissive configuration. Even with whitelists, a single `mail send` call sends immediately — no user review, no second chance to cancel.
+
+**Solution:** A **two-step workflow** that requires explicit user confirmation for every email send operation. This prevents prompt injection attacks from sending emails without user knowledge.
+
+### Implementation
+
+**New Operations:**
+
+1. **`mail prepare`** - Prepares email and returns confirmation code:
+   ```typescript
+   mail prepare to="recipient@example.com" subject="Important" body="..." cc="copy@example.com"
+   ```
+
+2. **`mail confirm code=XXXX-XXXX`** - Sends email only with valid code:
+   ```typescript
+   mail confirm code=A1B2-C3D4
+   ```
+
+**Code Generation & Storage:**
+```typescript
+// utils/mail.ts
+const pendingSends = new Map<string, { to: string; subject: string; body: string; cc?: string; bcc?: string; expires: number }>();
+const PENDING_SEND_TTL = 5 * 60 * 1000; // 5 minutes
+
+function generateConfirmCode(): string {
+    const code = randomBytes(4).toString('hex').toUpperCase();
+    return `${code.slice(0, 4)}-${code.slice(4, 8)}`; // Format: XXXX-XXXX
+}
+```
+
+**Workflow:**
+```
+User:   mail prepare to="alice@domain.com" subject="..." body="..."
+        ↓
+Server: ⚠️ EMAIL READY TO SEND
+        To: alice@domain.com
+        Subject: ...
+        Body preview: ...
+        ---
+        Confirm with: mail confirm code=A1B2-C3D4
+        (Code expires in 5 minutes)
+        ↓
+User:   mail confirm code=A1B2-C3D4
+        ↓
+Server: ✅ Email sent successfully to alice@domain.com
+```
+
+### Protection Layers
+
+| Layer | Protection | Status |
+|-------|------------|--------|
+| 1 | User must explicitly call `prepare` | ✅ Required |
+| 2 | User must read and confirm code | ✅ Required |
+| 3 | Code expires after 5 minutes | ✅ Automatic |
+| 4 | Code is single-use (deleted after confirmation) | ✅ Automatic |
+| 5 | Full email details shown before confirmation | ✅ Included |
+
+### Compatibility
+
+**Legacy `mail send`:** Still works for backwards compatibility, but **bypasses user confirmation**.
+
+**Recommendation:** 
+- Use `prepare` + `confirm` for production
+- Disable direct `send` via send-guard whitelist if maximum security is required
+- Keep `send` only for development/testing
+
 ---
 
 ## 5. AppleScript Input Validation & Escaping
@@ -655,7 +727,89 @@ Once granted, permissions persist:
 
 ---
 
-## 8. Defense-in-Depth Strategy
+## 8. Intelligent Content Truncation
+
+**Problem:** Hard character limits that truncate mid-sentence can break content readability while still allowing large adversarial payloads. We need limits that are both **user-friendly** and **secure**.
+
+**Solution:** Smart truncation that cuts at natural boundaries (sentences, paragraphs) and provides informative suffixes.
+
+### Implementation
+
+**Utility Function in `utils/applescript-escape.ts`:**
+
+```typescript
+export function truncateSmart(text: string, maxLen: number, suffix = "..."): string {
+    if (text.length <= maxLen) return text;
+    
+    // Look for sentence boundaries (.!?) or newlines
+    const searchText = text.slice(0, maxLen + 10);
+    let bestPos = -1;
+    
+    // Check for various boundaries
+    const boundaries = [
+        { pos: searchText.lastIndexOf('. '), weight: 3 },
+        { pos: searchText.lastIndexOf('? '), weight: 3 },
+        { pos: searchText.lastIndexOf('! '), weight: 3 },
+        { pos: searchText.lastIndexOf('\n'), weight: 2 },
+        { pos: searchText.lastIndexOf('.\n'), weight: 4 },
+    ];
+    
+    // Find best boundary within acceptable range
+    for (const { pos } of boundaries) {
+        const minKeep = Math.max(50, Math.floor(maxLen * 0.8));
+        if (pos > minKeep && pos <= maxLen && (bestPos === -1 || pos > bestPos)) {
+            bestPos = pos;
+        }
+    }
+    
+    // Use boundary if found
+    if (bestPos > -1) {
+        return searchText.slice(0, bestPos + 1) + suffix;
+    }
+    
+    // Fallback: hard truncate
+    return text.slice(0, maxLen) + suffix;
+}
+```
+
+### Applied Limits
+
+| Context | Limit | Suffix |
+|---------|-------|--------|
+| Mail: unread/latest preview | **1,000 chars** | `...` |
+| Mail: search results | **10,000 chars** | `[Content truncated. Use mail details to see full email]` |
+| Calendar: list/search | **500 chars** | N/A (notes stripped) |
+| Calendar: details | **Unlimited** | N/A (user explicitly requested) |
+
+### Security Benefits
+
+**1. Reduces Prompt Injection Surface:**
+- Max payload size limited to 10K chars
+- Attacker cannot inject arbitrarily large malicious content
+- Defense-in-depth: even if tagging fails, payload is limited
+
+**2. User Experience:**
+- No mid-sentence cuts in previews
+- Clear indication when content is truncated
+- User knows how to access full content (via `details` or `mail details`)
+
+**3. Balance:**
+- 1,000 chars ≈ 200-250 words (reasonable email preview)
+- 10,000 chars ≈ 2,000 words (most emails fit)
+- 500 chars for calendar (title + location typically <500)
+
+### Trade-offs
+
+| Concern | Mitigation |
+|---------|------------|
+| Information Loss | Smart boundaries + clear suffix |
+| Token Cost | 10K chars ≈ 2,500-3,000 tokens (acceptable) |
+| Performance | String operations on 10K chars are negligible |
+| Complexity | Encapsulated in single utility function |
+
+---
+
+## 9. Defense-in-Depth Strategy
 
 ### Layer 1: Input Validation
 - Validate all user inputs

@@ -7,6 +7,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import tools from "./tools";
 import { assertSendAllowed, SendNotAllowedError } from "./utils/send-guard";
+import { truncateSmart } from "./utils/applescript-escape";
 
 /**
  * Wraps content fetched from external sources (emails, messages, notes, contacts)
@@ -575,7 +576,7 @@ function initServer() {
 										emails
 											.map(
 												(email: any) =>
-													`[${email.dateSent}] From: ${email.sender}${email.ref ? ` | Ref: ${email.ref}` : ""}\nMailbox: ${email.mailbox}\nSubject: ${email.subject}\n${email.content.substring(0, 500)}${email.content.length > 500 ? "..." : ""}`,
+													`[${email.dateSent}] From: ${email.sender}${email.ref ? ` | Ref: ${email.ref}` : ""}\nMailbox: ${email.mailbox}\nSubject: ${email.subject}\n${truncateSmart(email.content || "", 1000)}`,
 											)
 											.join("\n\n")
 									: `No unread emails found${args.account ? ` in account "${args.account}"` : ""}${args.mailbox ? ` and mailbox "${args.mailbox}"` : ""}`;
@@ -607,7 +608,7 @@ function initServer() {
 										emails
 											.map(
 												(email: any) =>
-													`[${email.dateSent}] From: ${email.sender}${email.ref ? ` | Ref: ${email.ref}` : ""}\nMailbox: ${email.mailbox}\nSubject: ${email.subject}\n${email.content}`,
+													`[${email.dateSent}] From: ${email.sender}${email.ref ? ` | Ref: ${email.ref}` : ""}\nMailbox: ${email.mailbox}\nSubject: ${email.subject}\n${truncateSmart(email.content || "", 10000, "\n\n[Content truncated. Use mail details to see full email]")}`,
 											)
 											.join("\n\n")
 									: `No emails found for "${args.searchTerm}"${args.account ? ` in account "${args.account}"` : ""}${args.mailbox ? ` and mailbox "${args.mailbox}"` : ""}`;
@@ -667,6 +668,64 @@ function initServer() {
 								const replyResult = await mailModule.replyToEmail(args.ref, args.body);
 								return {
 									content: [{ type: "text", text: replyResult ?? "Reply sent." }],
+									isError: false,
+								};
+							}
+
+							case "prepare": {
+								if (!args.to && !args.toContactName) {
+									throw new Error("Either 'to' or 'toContactName' is required for prepare operation");
+								}
+								if (!args.subject || !args.body) {
+									throw new Error("Subject and body are required for prepare operation");
+								}
+								
+								const contactsForMail = await loadModule("contacts");
+								let recipientAddress: string;
+								if (args.toContactName) {
+									const emails = await contactsForMail.findEmailByName(args.toContactName);
+									if (emails.length === 0) {
+										throw new Error(`No email address found in Contacts for "${args.toContactName}"`);
+									}
+									recipientAddress = emails[0];
+								} else {
+									recipientAddress = args.to!;
+								}
+								
+								// Prepare the email and get confirmation code
+								const result = await mailModule.prepareMail(
+									recipientAddress,
+									args.subject,
+									args.body,
+									args.cc,
+									args.bcc,
+								);
+								
+								// format the response with the confirmation code
+								const displayTo = args.toContactName || recipientAddress;
+								return {
+									content: [{
+										type: "text",
+										text: `⚠️  EMAIL READY TO SEND\n` +
+											`To: ${displayTo}\n` +
+											`Subject: ${args.subject}\n` +
+											`Body preview: ${args.body.substring(0, 100)}${args.body.length > 100 ? "..." : ""}\n` +
+											`---\n` +
+											`Confirm with: mail confirm code=${result.code}\n` +
+											`(Code expires in 5 minutes)`,
+									}],
+									isError: false,
+								};
+							}
+
+							case "confirm": {
+								if (!args.code) {
+									throw new Error("Confirmation code is required for confirm operation");
+								}
+								
+								const result = await mailModule.confirmMail(args.code);
+								return {
+									content: [{ type: "text", text: result }],
 									isError: false,
 								};
 							}
@@ -741,7 +800,7 @@ function initServer() {
 										emails
 											.map(
 												(email: any) =>
-													`[${email.dateSent}] From: ${email.sender}${email.ref ? ` | Ref: ${email.ref}` : ""}\nMailbox: ${email.mailbox}\nSubject: ${email.subject}\n${email.content.substring(0, 500)}${email.content.length > 500 ? "..." : ""}`,
+													`[${email.dateSent}] From: ${email.sender}${email.ref ? ` | Ref: ${email.ref}` : ""}\nMailbox: ${email.mailbox}\nSubject: ${email.subject}\n${truncateSmart(email.content || "", 1000)}`,
 											)
 											.join("\n\n")
 									: `No latest emails found in account "${account}"`;
@@ -954,8 +1013,7 @@ function initServer() {
 																	`${event.title} (${new Date(event.startDate!).toLocaleString()} - ${new Date(event.endDate!).toLocaleString()})\n` +
 																	`Location: ${event.location || "Not specified"}\n` +
 																	`Calendar: ${event.calendarName}\n` +
-																	`ID: ${event.id}\n` +
-																	`${event.notes ? `Notes: ${event.notes.slice(0, 500)}${event.notes.length > 500 ? "…" : ""}\n` : ""}`,
+																	`ID: ${event.id}\n` 
 															)
 															.join("\n\n")}`
 													: `No events found matching "${searchText}".`
@@ -1010,8 +1068,7 @@ function initServer() {
 																	`${event.title} (${new Date(event.startDate!).toLocaleString()} - ${new Date(event.endDate!).toLocaleString()})\n` +
 																	`Location: ${event.location || "Not specified"}\n` +
 																	`Calendar: ${event.calendarName}\n` +
-																	`ID: ${event.id}` +
-																	`${event.notes ? `\nNotes: ${event.notes.slice(0, 500)}${event.notes.length > 500 ? "…" : ""}` : ""}`,
+																	`ID: ${event.id}` 
 															)
 															.join("\n\n")}`
 													: `No events found from ${startDateText} to ${endDateText}.`
@@ -1439,7 +1496,7 @@ function isMessagesArgs(args: unknown): args is {
 }
 
 function isMailArgs(args: unknown): args is {
-	operation: "unread" | "search" | "send" | "reply" | "mailboxes" | "accounts" | "latest" | "trash" | "markRead";
+	operation: "unread" | "search" | "send" | "reply" | "mailboxes" | "accounts" | "latest" | "trash" | "markRead" | "prepare" | "confirm";
 	account?: string;
 	mailbox?: string;
 	limit?: number;
@@ -1453,6 +1510,7 @@ function isMailArgs(args: unknown): args is {
 	trashSubject?: string;
 	trashSender?: string;
 	ref?: string;
+	code?: string;
 } {
 	if (typeof args !== "object" || args === null) return false;
 
@@ -1471,11 +1529,12 @@ function isMailArgs(args: unknown): args is {
 		trashSubject,
 		trashSender,
 		ref,
+		code,
 	} = args as any;
 
 	if (
 		!operation ||
-		!["unread", "search", "send", "reply", "mailboxes", "accounts", "latest", "trash", "markRead"].includes(
+		!["unread", "search", "send", "reply", "mailboxes", "accounts", "latest", "trash", "markRead", "prepare", "confirm"].includes(
 			operation,
 		)
 	) {
@@ -1504,6 +1563,16 @@ function isMailArgs(args: unknown): args is {
 			if (!trashSubject || typeof trashSubject !== "string") return false;
 			if (!trashSender || typeof trashSender !== "string") return false;
 			break;
+		case "prepare":
+			if (!to && !toContactName) return false;
+			if (to && typeof to !== "string") return false;
+			if (toContactName && typeof toContactName !== "string") return false;
+			if (!subject || typeof subject !== "string") return false;
+			if (!body || typeof body !== "string") return false;
+			break;
+		case "confirm":
+			if (!code || typeof code !== "string") return false;
+			break;
 		case "unread":
 		case "mailboxes":
 		case "accounts":
@@ -1521,6 +1590,7 @@ function isMailArgs(args: unknown): args is {
 	if (trashSubject && typeof trashSubject !== "string") return false;
 	if (trashSender && typeof trashSender !== "string") return false;
 	if (ref && typeof ref !== "string") return false;
+	if (code && typeof code !== "string") return false;
 
 	return true;
 }

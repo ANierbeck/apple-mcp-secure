@@ -23,17 +23,21 @@ A fork of [apple-mcp](https://github.com/supermemoryai/apple-mcp) that has evolv
 ## 🎯 What It Does
 
 ### 📧 **Mail** (NEW - 10-30x faster)
-- **Unread emails:** Get unread count from any account (<1 second)
+- **Unread emails:** Get unread emails from any account (<1 second)
 - **Search emails:** Full-text search with account filtering
-- **Send emails:** Send with CC, BCC, attachments (scheduled optional)
+- **Send emails:** Send with CC, BCC (direct address or contact name)
+- **Reply:** Reply to retrieved emails via opaque ref — sender address never exposed to AI
+- **Trash / Mark read:** Move emails to Trash or mark as read
 - **Account whitelist:** Control which accounts are accessible via `APPLE_MCP_MAIL_ACCOUNT_WHITELIST`
 
 **Performance:** 0.4-0.5s for typical queries, <1s even for 7,000+ message mailboxes.
 
 ### 📅 **Calendar** (NEW - 50-100x faster)
-- **Get events:** Query by date range, with location and notes
-- **List calendars:** See all calendars with event counts
-- **Multiple calendars:** Search across calendars simultaneously
+- **Get events:** Query by date range with location; notes stripped by default for privacy
+- **Event details:** On-demand full event including notes via `details` operation
+- **Search events:** Title-based search across all allowed calendars
+- **Create events:** Add events with title, date/time, location, notes
+- **List calendars:** See all calendars with event counts and filter status
 - **Calendar filtering:** Allowlist/blocklist via environment variables
 
 **Performance:** <100ms for typical queries, even on 12,000+ event calendars.
@@ -100,6 +104,65 @@ A fork of [apple-mcp](https://github.com/supermemoryai/apple-mcp) that has evolv
 - **[MAILKIT_IMPLEMENTATION.md](MAILKIT_IMPLEMENTATION.md)** - Mail implementation, architecture, performance analysis
 - **[EVENTKIT_IMPLEMENTATION.md](EVENTKIT_IMPLEMENTATION.md)** - Calendar implementation, native API details
 - **[CLAUDE.md](CLAUDE.md)** - Development guidelines for code style and testing
+
+---
+
+## 🛡️ Privacy by Design
+
+apple-mcp-secure treats the MCP server as a **privacy-preserving proxy**: sensitive data is resolved and used locally, but never forwarded to the AI model. These are hardcoded, non-configurable design decisions.
+
+### What the AI never sees
+
+| Data | Transmitted to AI | Reason |
+|------|------------------|--------|
+| Contact name | Yes | Low sensitivity; needed to identify the person |
+| Phone number | Yes | Needed for Messages operations |
+| Contact email address | **No** | Third-party data — no consent, unnecessary exposure |
+| Full sender address in emails | **No** | Replaced by display name + opaque ref |
+| Calendar event notes (list/search) | **No** | Potentially sensitive; available on explicit request |
+
+### Sending Email to a Contact
+
+Use `toContactName` instead of `to` when the recipient is in your Contacts:
+
+```
+# Privacy-preserving (preferred)
+mail send toContactName="John Doe" subject="Hello" body="..."
+
+# Direct address typed by user (also supported)
+mail send to="john@example.com" subject="Hello" body="..."
+```
+
+With `toContactName`, the email address is resolved locally by the MCP server and **never returned to Claude at any point**.
+
+### Email Sender Anonymization
+
+When retrieving emails (unread/search/latest), sender addresses are anonymized before being returned to the AI:
+
+- `John Doe <john@example.com>` → `John Doe`
+- `john@example.com` → `j***@example.com`
+
+The full address is retained in a session-scoped server-side map, keyed by an opaque **ref** that the AI receives alongside each email.
+
+### Replying Without Exposing the Address
+
+Use the `reply` operation with the ref from a retrieved email:
+
+```
+mail reply ref="a3f1b2c4d5e6f7a8" body="Thanks for reaching out!"
+```
+
+The server looks up the original sender from the session map and calls `sendMail` directly. The AI never learns the actual address.
+
+### Calendar Notes: Opt-In Access
+
+Event notes (descriptions) may contain private information (medical appointments, personal remarks). They are **stripped from `list` and `search` results by default**. To retrieve notes for a specific event, use the `details` operation:
+
+```
+calendar details eventId="A1B2C3D4-..."
+```
+
+This returns the full event including notes, tagged as external content so Claude treats it as untrusted data.
 
 ---
 
@@ -177,9 +240,10 @@ Grant these so the tools can access your data.
 - Attachments not fully extracted (headers only)
 
 ### Calendar
-- Read-only access (no event creation/modification)
-- Recurring events not expanded (returns base event)
-- No real-time notifications (query-based only)
+- Event creation supported; modification and deletion not yet implemented
+- Event notes stripped from list/search results (use `details` operation to retrieve)
+- Recurring events not expanded (returns base event only)
+- `details` operation uses CalDAV UID for lookup; may not match when EventKit is the source (EventKit uses an internal identifier)
 
 ### Other Tools
 - Same limitations as original apple-mcp (AppleScript-based)
@@ -196,6 +260,8 @@ Grant these so the tools can access your data.
 | **Mail Implementation** | AppleScript | Swift binary | ⭐ New |
 | **Calendar Implementation** | AppleScript | Native EventKit | ⭐ New |
 | **Access Control** | None | Whitelist-based | ⭐ Enhanced |
+| **Privacy (sender/contacts)** | Exposed to AI | Anonymized / never exposed | ⭐ New |
+| **Privacy (calendar notes)** | Exposed | Opt-in via `details` | ⭐ New |
 | **Error Handling** | Basic | Comprehensive | ⭐ Enhanced |
 | **Other Tools** | Original | Unchanged | Same |
 
@@ -270,6 +336,6 @@ Please follow [CLAUDE.md](CLAUDE.md) for code style guidelines.
 **Status:** Production-ready ✅  
 **Version:** 0.1.0  
 **License:** MIT  
-**Last Updated:** April 19, 2026  
+**Last Updated:** April 25, 2026  
 **Performance:** Mail 10-30x faster, Calendar 50-100x faster  
 **Documentation:** Complete (8 comprehensive guides)

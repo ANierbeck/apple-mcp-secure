@@ -575,7 +575,7 @@ function initServer() {
 										emails
 											.map(
 												(email: any) =>
-													`[${email.dateSent}] From: ${email.sender}\nMailbox: ${email.mailbox}\nSubject: ${email.subject}\n${email.content.substring(0, 500)}${email.content.length > 500 ? "..." : ""}`,
+													`[${email.dateSent}] From: ${email.sender}${email.ref ? ` | Ref: ${email.ref}` : ""}\nMailbox: ${email.mailbox}\nSubject: ${email.subject}\n${email.content.substring(0, 500)}${email.content.length > 500 ? "..." : ""}`,
 											)
 											.join("\n\n")
 									: `No unread emails found${args.account ? ` in account "${args.account}"` : ""}${args.mailbox ? ` and mailbox "${args.mailbox}"` : ""}`;
@@ -607,7 +607,7 @@ function initServer() {
 										emails
 											.map(
 												(email: any) =>
-													`[${email.dateSent}] From: ${email.sender}\nMailbox: ${email.mailbox}\nSubject: ${email.subject}\n${email.content}`,
+													`[${email.dateSent}] From: ${email.sender}${email.ref ? ` | Ref: ${email.ref}` : ""}\nMailbox: ${email.mailbox}\nSubject: ${email.subject}\n${email.content}`,
 											)
 											.join("\n\n")
 									: `No emails found for "${args.searchTerm}"${args.account ? ` in account "${args.account}"` : ""}${args.mailbox ? ` and mailbox "${args.mailbox}"` : ""}`;
@@ -625,15 +625,30 @@ function initServer() {
 							}
 
 							case "send": {
-								if (!args.to || !args.subject || !args.body) {
+								if (!args.subject || !args.body) {
+									throw new Error("Subject and body are required for send operation");
+								}
+								if (!args.to && !args.toContactName) {
 									throw new Error(
-										"Recipient (to), subject, and body are required for send operation",
+										"Either 'to' (email address) or 'toContactName' (contact name) is required for send operation",
 									);
 								}
 								const contactsForMail = await loadModule("contacts");
-								await assertSendAllowed("email", args.to, contactsForMail);
+								let recipientAddress: string;
+								if (args.toContactName) {
+									const emails = await contactsForMail.findEmailByName(args.toContactName);
+									if (emails.length === 0) {
+										throw new Error(
+											`No email address found in Contacts for "${args.toContactName}"`,
+										);
+									}
+									recipientAddress = emails[0];
+								} else {
+									recipientAddress = args.to!;
+								}
+								await assertSendAllowed("email", recipientAddress, contactsForMail);
 								const result = await mailModule.sendMail(
-									args.to,
+									recipientAddress,
 									args.subject,
 									args.body,
 									args.cc,
@@ -641,6 +656,17 @@ function initServer() {
 								);
 								return {
 									content: [{ type: "text", text: result }],
+									isError: false,
+								};
+							}
+
+							case "reply": {
+								if (!args.ref || !args.body) {
+									throw new Error("ref and body are required for reply operation");
+								}
+								const replyResult = await mailModule.replyToEmail(args.ref, args.body);
+								return {
+									content: [{ type: "text", text: replyResult ?? "Reply sent." }],
 									isError: false,
 								};
 							}
@@ -715,7 +741,7 @@ function initServer() {
 										emails
 											.map(
 												(email: any) =>
-													`[${email.dateSent}] From: ${email.sender}\nMailbox: ${email.mailbox}\nSubject: ${email.subject}\n${email.content.substring(0, 500)}${email.content.length > 500 ? "..." : ""}`,
+													`[${email.dateSent}] From: ${email.sender}${email.ref ? ` | Ref: ${email.ref}` : ""}\nMailbox: ${email.mailbox}\nSubject: ${email.subject}\n${email.content.substring(0, 500)}${email.content.length > 500 ? "..." : ""}`,
 											)
 											.join("\n\n")
 									: `No latest emails found in account "${account}"`;
@@ -1025,6 +1051,29 @@ function initServer() {
 										},
 									],
 									isError: !result.success,
+								};
+							}
+
+							case "details": {
+								const { eventId } = args;
+								const event = await calendarModule.getEventDetails(eventId!);
+								return {
+									content: [
+										{
+											type: "text",
+											text: event
+												? tagExternalContent(
+													"Apple Calendar",
+													`${event.title} (${new Date(event.startDate!).toLocaleString()} - ${new Date(event.endDate!).toLocaleString()})\n` +
+													`Location: ${event.location || "Not specified"}\n` +
+													`Calendar: ${event.calendarName}\n` +
+													`ID: ${event.id}\n` +
+													`${event.notes ? `Notes: ${event.notes}` : "No notes"}`,
+												  )
+												: `No event found with ID "${eventId}".`,
+										},
+									],
+									isError: false,
 								};
 							}
 
@@ -1390,18 +1439,20 @@ function isMessagesArgs(args: unknown): args is {
 }
 
 function isMailArgs(args: unknown): args is {
-	operation: "unread" | "search" | "send" | "mailboxes" | "accounts" | "latest" | "trash" | "markRead";
+	operation: "unread" | "search" | "send" | "reply" | "mailboxes" | "accounts" | "latest" | "trash" | "markRead";
 	account?: string;
 	mailbox?: string;
 	limit?: number;
 	searchTerm?: string;
 	to?: string;
+	toContactName?: string;
 	subject?: string;
 	body?: string;
 	cc?: string;
 	bcc?: string;
 	trashSubject?: string;
 	trashSender?: string;
+	ref?: string;
 } {
 	if (typeof args !== "object" || args === null) return false;
 
@@ -1412,17 +1463,19 @@ function isMailArgs(args: unknown): args is {
 		limit,
 		searchTerm,
 		to,
+		toContactName,
 		subject,
 		body,
 		cc,
 		bcc,
 		trashSubject,
 		trashSender,
+		ref,
 	} = args as any;
 
 	if (
 		!operation ||
-		!["unread", "search", "send", "mailboxes", "accounts", "latest", "trash", "markRead"].includes(
+		!["unread", "search", "send", "reply", "mailboxes", "accounts", "latest", "trash", "markRead"].includes(
 			operation,
 		)
 	) {
@@ -1435,15 +1488,15 @@ function isMailArgs(args: unknown): args is {
 			if (!searchTerm || typeof searchTerm !== "string") return false;
 			break;
 		case "send":
-			if (
-				!to ||
-				typeof to !== "string" ||
-				!subject ||
-				typeof subject !== "string" ||
-				!body ||
-				typeof body !== "string"
-			)
+			if (!subject || typeof subject !== "string" || !body || typeof body !== "string")
 				return false;
+			if (!to && !toContactName) return false;
+			if (to && typeof to !== "string") return false;
+			if (toContactName && typeof toContactName !== "string") return false;
+			break;
+		case "reply":
+			if (!ref || typeof ref !== "string") return false;
+			if (!body || typeof body !== "string") return false;
 			break;
 		case "trash":
 		case "markRead":
@@ -1467,6 +1520,7 @@ function isMailArgs(args: unknown): args is {
 	if (bcc && typeof bcc !== "string") return false;
 	if (trashSubject && typeof trashSubject !== "string") return false;
 	if (trashSender && typeof trashSender !== "string") return false;
+	if (ref && typeof ref !== "string") return false;
 
 	return true;
 }
@@ -1524,7 +1578,7 @@ function isRemindersArgs(args: unknown): args is {
 
 
 function isCalendarArgs(args: unknown): args is {
-	operation: "search" | "open" | "list" | "create" | "calendars";
+	operation: "search" | "open" | "list" | "create" | "calendars" | "details";
 	searchText?: string;
 	eventId?: string;
 	limit?: number;
@@ -1547,7 +1601,7 @@ function isCalendarArgs(args: unknown): args is {
 		return false;
 	}
 
-	if (!["search", "open", "list", "create", "calendars"].includes(operation)) {
+	if (!["search", "open", "list", "create", "calendars", "details"].includes(operation)) {
 		return false;
 	}
 
@@ -1559,7 +1613,7 @@ function isCalendarArgs(args: unknown): args is {
 		}
 	}
 
-	if (operation === "open") {
+	if (operation === "open" || operation === "details") {
 		const { eventId } = args as { eventId?: unknown };
 		if (typeof eventId !== "string") {
 			return false;

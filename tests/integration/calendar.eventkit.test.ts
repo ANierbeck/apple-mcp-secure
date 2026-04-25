@@ -182,7 +182,7 @@ describe("Calendar EventKit Integration", () => {
 		test("provides meaningful error messages", () => {
 			const response = MOCK_EVENTKIT_ERROR;
 			const message = response.errors
-				.map((e) => `${e.account}: ${e.reason}`)
+				.map((e) => `${e.calendar}: ${e.reason}`)
 				.join(", ");
 
 			expect(message).toContain("access_denied");

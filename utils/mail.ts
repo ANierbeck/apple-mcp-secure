@@ -1,8 +1,27 @@
 import { runAppleScript } from "run-applescript";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
 import { escapeAppleScriptString, sanitizeSearchTerm, validateEmail, validateName } from "./applescript-escape.js";
 import { ensureAppRunning } from "./app-launcher.js";
 import { getUnreadEmailsViaMailKit, isMailKitAvailable } from "./mailkit.js";
+
+// Session-scoped map from opaque ref → {full sender address, subject}.
+// The model only ever sees the ref, never the raw sender address.
+const emailRefMap = new Map<string, { sender: string; subject: string }>();
+
+function anonymizeSender(sender: string): string {
+	const nameMatch = sender.match(/^(.+?)\s*<[^>]+>$/);
+	if (nameMatch) return nameMatch[1].trim();
+	const emailMatch = sender.match(/^([^@\s]+)@(.+)$/);
+	if (emailMatch) return `${emailMatch[1][0]}***@${emailMatch[2]}`;
+	return sender;
+}
+
+function registerEmailRef(sender: string, subject: string, id?: string, epoch?: number): string {
+	const input = `${id || ""}|${epoch ?? Date.now()}|${subject}`;
+	const ref = createHash("sha256").update(input).digest("hex").slice(0, 16);
+	emailRefMap.set(ref, { sender, subject });
+	return ref;
+}
 
 // Configuration
 const CONFIG = {
@@ -42,6 +61,7 @@ interface EmailMessage {
 	isRead: boolean;
 	mailbox: string;
 	account?: string;
+	ref?: string;
 }
 
 /**
@@ -110,16 +130,21 @@ async function getUnreadMails(limit = 10, account?: string): Promise<EmailMessag
 			return mkEmails
 				.filter((email) => isAccountAllowed(email.account))
 				.slice(0, limit)
-				.map((email) => ({
-					subject: email.subject,
-					sender: email.sender,
-					dateSent: email.dateSent,
-					epoch: new Date(email.dateSent).getTime() / 1000,
-					content: email.preview,
-					isRead: email.isRead,
-					mailbox: email.mailbox,
-					account: email.account,
-				}));
+				.map((email) => {
+					const epoch = new Date(email.dateSent).getTime() / 1000;
+					const ref = registerEmailRef(email.sender, email.subject, undefined, epoch);
+					return {
+						subject: email.subject,
+						sender: anonymizeSender(email.sender),
+						dateSent: email.dateSent,
+						epoch,
+						content: email.preview,
+						isRead: email.isRead,
+						mailbox: email.mailbox,
+						account: email.account,
+						ref,
+					};
+				});
 		} catch (error) {
 			console.error(
 				"[mail] MailKit failed, falling back to AppleScript:",
@@ -281,18 +306,23 @@ end tell`;
 					fields[part.slice(0, idx)] = part.slice(idx + 1);
 				}
 			});
+			const fullSender = fields["SENDER"] || "Unknown sender";
+			const subject = fields["SUBJECT"] || "No subject";
+			const epoch = parseInt(fields["EPOCH"] || "0", 10);
+			const ref = registerEmailRef(fullSender, subject, undefined, epoch);
 			return {
-				subject: fields["SUBJECT"] || "No subject",
-				sender: fields["SENDER"] || "Unknown sender",
+				subject,
+				sender: anonymizeSender(fullSender),
 				dateSent: fields["DATE"] || new Date().toString(),
-				epoch: parseInt(fields["EPOCH"] || "0", 10),
+				epoch,
 				content: fields["CONTENT"] || "[Content not available]",
 				isRead: false,
 				mailbox: fields["MAILBOX"] || "Unknown",
+				ref,
 			};
 		})
 		// Sort newest-first using the numeric epoch key (locale-independent)
-		.sort((a, b) => b.epoch - a.epoch)
+		.sort((a, b) => (b.epoch ?? 0) - (a.epoch ?? 0))
 		.slice(0, maxLimit);
 	} catch (error) {
 		console.error(
@@ -416,13 +446,17 @@ end tell`;
 					fields[part.slice(0, idx)] = part.slice(idx + 1);
 				}
 			});
+			const fullSender = fields["SENDER"] || "Unknown sender";
+			const subject = fields["SUBJECT"] || "No subject";
+			const ref = registerEmailRef(fullSender, subject);
 			return {
-				subject: fields["SUBJECT"] || "No subject",
-				sender: fields["SENDER"] || "Unknown sender",
+				subject,
+				sender: anonymizeSender(fullSender),
 				dateSent: fields["DATE"] || new Date().toString(),
 				content: fields["CONTENT"] || "[Content not available]",
 				isRead: fields["READ"] === "true",
 				mailbox: fields["MAILBOX"] || "Unknown",
+				ref,
 			};
 		});
 	} catch (error) {
@@ -764,13 +798,17 @@ end tell`;
 					fields[part.slice(0, idx)] = part.slice(idx + 1);
 				}
 			});
+			const fullSender = fields["SENDER"] || "Unknown sender";
+			const subject = fields["SUBJECT"] || "No subject";
+			const ref = registerEmailRef(fullSender, subject);
 			return {
-				subject: fields["SUBJECT"] || "No subject",
-				sender: fields["SENDER"] || "Unknown sender",
+				subject,
+				sender: anonymizeSender(fullSender),
 				dateSent: fields["DATE"] || new Date().toString(),
 				content: "[Use search to retrieve email content]",
 				isRead: false,
 				mailbox: `${account} - ${fields["MAILBOX"] || "Unknown"}`,
+				ref,
 			};
 		})
 		// Sort newest-first by date, then take the requested limit
@@ -962,10 +1000,26 @@ end tell`;
 	}
 }
 
+/**
+ * Reply to a previously retrieved email using its opaque ref.
+ * Looks up the full sender address from the session-scoped map so the address
+ * is never exposed to the model.
+ */
+async function replyToEmail(ref: string, body: string): Promise<string | undefined> {
+	const entry = emailRefMap.get(ref);
+	if (!entry) {
+		throw new Error(
+			`Unknown email ref "${ref}". Refs are session-scoped and expire on server restart.`,
+		);
+	}
+	return sendMail(entry.sender, `Re: ${entry.subject}`, body);
+}
+
 export default {
 	getUnreadMails,
 	searchMails,
 	sendMail,
+	replyToEmail,
 	getMailboxes,
 	getAccounts,
 	getMailboxesForAccount,

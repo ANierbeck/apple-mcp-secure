@@ -27,7 +27,7 @@ interface EventKitCalendar {
 	source: string;
 }
 
-interface EventKitEvent {
+export interface EventKitEvent {
 	id: string;
 	title: string;
 	startDate: string; // ISO8601

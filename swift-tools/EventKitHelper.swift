@@ -55,11 +55,25 @@ func parseISO(_ dateString: String) -> Date? {
     return formatter.date(from: dateString)
 }
 
+// MARK: - Calendar Visibility
+
+/// Returns the set of calendar identifiers that the user has unchecked in Calendar.app.
+/// Calendar.app stores this in com.apple.iCal > DisabledCalendars > MainWindow.
+func disabledCalendarIDs() -> Set<String> {
+    guard let prefs = UserDefaults(suiteName: "com.apple.iCal"),
+          let disabled = prefs.dictionary(forKey: "DisabledCalendars"),
+          let mainWindow = disabled["MainWindow"] as? [String] else {
+        return []
+    }
+    return Set(mainWindow)
+}
+
 // MARK: - Main EventKit Helper
 
 class EventKitHelper {
     let eventStore = EKEventStore()
     var errors: [ErrorInfo] = []
+    let disabledIDs: Set<String> = disabledCalendarIDs()
 
     func requestAccess() async -> Bool {
         do {
@@ -87,6 +101,7 @@ class EventKitHelper {
 
     func listCalendars(dateRange: DateRange) -> [CalendarInfo] {
         let calendars = eventStore.calendars(for: .event)
+            .filter { !disabledIDs.contains($0.calendarIdentifier) }
 
         return calendars.compactMap { calendar in
             // Count events in date range
@@ -105,7 +120,10 @@ class EventKitHelper {
     }
 
     func getEvents(dateRange: DateRange, calendarNames: [String]? = nil) -> [EventInfo] {
-        let predicate = eventStore.predicateForEvents(withStart: dateRange.start, end: dateRange.end, calendars: nil)
+        let activeCalendars = eventStore.calendars(for: .event)
+            .filter { !disabledIDs.contains($0.calendarIdentifier) }
+
+        let predicate = eventStore.predicateForEvents(withStart: dateRange.start, end: dateRange.end, calendars: activeCalendars)
         let allEvents = eventStore.events(matching: predicate)
 
         let filteredEvents: [EKEvent]
@@ -136,7 +154,10 @@ class EventKitHelper {
     }
 
     func searchEvents(dateRange: DateRange, searchTerm: String) -> [EventInfo] {
-        let predicate = eventStore.predicateForEvents(withStart: dateRange.start, end: dateRange.end, calendars: nil)
+        let activeCalendars = eventStore.calendars(for: .event)
+            .filter { !disabledIDs.contains($0.calendarIdentifier) }
+
+        let predicate = eventStore.predicateForEvents(withStart: dateRange.start, end: dateRange.end, calendars: activeCalendars)
         let allEvents = eventStore.events(matching: predicate)
 
         let searchLower = searchTerm.lowercased()

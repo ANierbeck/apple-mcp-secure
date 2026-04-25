@@ -2,7 +2,7 @@ import { type Tool } from "@modelcontextprotocol/sdk/types.js";
 
 const CONTACTS_TOOL: Tool = {
     name: "contacts",
-    description: "Search and retrieve contacts from Apple Contacts app",
+    description: "Search contacts from Apple Contacts app. Returns names and phone numbers only — email addresses are intentionally never included in responses (privacy by design). To send an email to a contact, use the mail tool with toContactName instead.",
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
@@ -102,8 +102,8 @@ const CONTACTS_TOOL: Tool = {
       properties: {
         operation: {
           type: "string",
-          description: "Operation to perform: 'unread', 'search', 'send', 'mailboxes', 'accounts', 'latest', 'trash', or 'markRead'",
-          enum: ["unread", "search", "send", "mailboxes", "accounts", "latest", "trash", "markRead"]
+          description: "Operation to perform: 'unread', 'search', 'send', 'reply', 'mailboxes', 'accounts', 'latest', 'trash', or 'markRead'",
+          enum: ["unread", "search", "send", "reply", "mailboxes", "accounts", "latest", "trash", "markRead"]
         },
         account: {
           type: "string",
@@ -123,7 +123,11 @@ const CONTACTS_TOOL: Tool = {
         },
         to: {
           type: "string",
-          description: "Recipient email address (required for send operation)"
+          description: "Recipient email address (optional for send — use toContactName instead when the recipient is in Contacts to avoid passing the address through the AI)"
+        },
+        toContactName: {
+          type: "string",
+          description: "Contact name to look up as recipient (alternative to 'to' for send operation — the server resolves the email address locally and never exposes it)"
         },
         subject: {
           type: "string",
@@ -148,12 +152,16 @@ const CONTACTS_TOOL: Tool = {
         trashSender: {
           type: "string",
           description: "Sender (name or email) of the email to trash — matched as 'contains' (required for trash operation)"
+        },
+        ref: {
+          type: "string",
+          description: "Opaque reference to a previously retrieved email (the 'ref' field from unread/search/latest results). Required for 'reply' operation — lets the server resolve the sender address without exposing it to the model."
         }
       },
       required: ["operation"]
     }
   };
-  
+
   const REMINDERS_TOOL: Tool = {
     name: "reminders",
     description: "Search, create, and open reminders in Apple Reminders app",
@@ -218,8 +226,8 @@ const CALENDAR_TOOL: Tool = {
     properties: {
       operation: {
         type: "string",
-        description: "Operation to perform: 'search', 'open', 'list', 'create', or 'calendars'",
-        enum: ["search", "open", "list", "create", "calendars"]
+        description: "Operation to perform: 'search', 'open', 'list', 'create', 'calendars', or 'details'",
+        enum: ["search", "open", "list", "create", "calendars", "details"]
       },
       searchText: {
         type: "string",
@@ -227,7 +235,7 @@ const CALENDAR_TOOL: Tool = {
       },
       eventId: {
         type: "string",
-        description: "ID of the event to open (required for open operation)"
+        description: "ID of the event to open or retrieve details for (required for open and details operations)"
       },
       limit: {
         type: "number",

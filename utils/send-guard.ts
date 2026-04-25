@@ -15,6 +15,7 @@
 
 type ContactsModule = {
     findContactByPhone: (phone: string) => Promise<string | null>;
+    findEmailByName: (name: string) => Promise<string[]>;
 };
 
 export class SendNotAllowedError extends Error {
@@ -72,8 +73,11 @@ export async function assertSendAllowed(
         return;
     }
 
-    // For emails without an explicit whitelist: allow (log a warning)
-    // Contacts email lookup requires additional AppleScript not yet implemented.
+    // For emails without an explicit whitelist: allow (log a warning).
+    // When sending via toContactName the address was resolved locally from Contacts,
+    // so no further verification is needed. For direct 'to' addresses typed by the
+    // user we allow them but warn, since verifying an arbitrary address against
+    // Contacts would require a reverse-lookup not worth the overhead here.
     console.error(
         `[send-guard] Warning: no APPLE_MCP_SEND_WHITELIST set. ` +
         `Email to "${recipient}" allowed by default. ` +

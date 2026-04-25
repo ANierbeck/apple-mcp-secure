@@ -259,20 +259,20 @@ async function getEvents(
 			// overhead if EventKit later fails.
 			const ekEvents = await getEventsViaEventKit(start, end);
 
-			// Convert EventKit format to CalendarEvent format, applying allowlist/blocklist
+			// Convert EventKit format to CalendarEvent format, applying allowlist/blocklist.
+			// No limit here — EventKit already scopes results to the requested date range.
 			const events: CalendarEvent[] = ekEvents
 				.filter((ek) => isCalendarAllowed(ek.calendar))
-				.slice(0, limit)
 				.map((ek) => ({
 					id: ek.id,
 					title: ek.title,
 					location: ek.location,
-					notes: ek.notes,
+					notes: null,
 					startDate: ek.startDate,
 					endDate: ek.endDate,
 					calendarName: ek.calendar,
 					isAllDay: ek.isAllDay,
-					url: null, // EventKit doesn't provide URL
+					url: null,
 				}));
 
 			return events;
@@ -365,7 +365,7 @@ end tell`;
 
 			try {
 				const result = (await runAppleScript(script)) as string;
-				allEvents.push(...parseEvents(result));
+				allEvents.push(...parseEvents(result).map((e) => ({ ...e, notes: null })));
 			} catch {
 				// runAppleScript-level error — skip this calendar
 			}
@@ -409,15 +409,15 @@ async function searchEvents(
 			// Avoids a redundant listCalendars() call (see getEvents for rationale).
 			const ekEvents = await searchEventsViaEventKit(searchText, start, end);
 
-			// Convert EventKit format to CalendarEvent format, applying allowlist/blocklist
+			// Convert EventKit format to CalendarEvent format, applying allowlist/blocklist.
+			// No limit here — EventKit already scopes results to the requested date range.
 			const events: CalendarEvent[] = ekEvents
 				.filter((ek) => isCalendarAllowed(ek.calendar))
-				.slice(0, limit)
 				.map((ek) => ({
 					id: ek.id,
 					title: ek.title,
 					location: ek.location,
-					notes: ek.notes,
+					notes: null,
 					startDate: ek.startDate,
 					endDate: ek.endDate,
 					calendarName: ek.calendar,
@@ -515,7 +515,7 @@ end tell`;
 
 			try {
 				const result = (await runAppleScript(script)) as string;
-				allEvents.push(...parseEvents(result));
+				allEvents.push(...parseEvents(result).map((e) => ({ ...e, notes: null })));
 			} catch {
 				// skip
 			}
@@ -624,6 +624,60 @@ async function openEvent(eventId: string): Promise<{ success: boolean; message: 
 }
 
 // ---------------------------------------------------------------------------
+// getEventDetails — fetch a single event by UID including notes
+// ---------------------------------------------------------------------------
+
+async function getEventDetails(eventId: string): Promise<CalendarEvent | null> {
+	try {
+		await ensureAppRunning("Calendar", "return name of first calendar");
+		const access = await requestCalendarAccess();
+		if (!access.hasAccess) return null;
+
+		// Sanitize: UIDs are alphanumeric/dash/dot — strip quotes to prevent injection
+		const safeId = eventId.replace(/"/g, "").slice(0, 500);
+
+		const script = `
+tell application "Calendar"
+    repeat with cal in every calendar
+        try
+            set evt to first event of cal whose uid is "${safeId}"
+            set evtTitle to summary of evt
+            set evtStart to (start date of evt) as string
+            set evtEnd to (end date of evt) as string
+            set evtAllDay to allday event of evt
+            set evtId to uid of evt
+            set calName to name of cal
+            set evtLoc to ""
+            try
+                set evtLoc to location of evt
+                if evtLoc is missing value then set evtLoc to ""
+            end try
+            set evtNotes to ""
+            try
+                set evtNotes to description of evt
+                if evtNotes is missing value then set evtNotes to ""
+            end try
+            set allDayStr to "false"
+            if evtAllDay then set allDayStr to "true"
+            return "ID:" & evtId & "|TITLE:" & evtTitle & "|START:" & evtStart & "|END:" & evtEnd & "|CAL:" & calName & "|ALLDAY:" & allDayStr & "|LOC:" & evtLoc & "|NOTES:" & evtNotes & "||"
+        end try
+    end repeat
+    return ""
+end tell`;
+
+		const result = (await runAppleScript(script)) as string;
+		if (!result) return null;
+		const events = parseEvents(result);
+		return events[0] || null;
+	} catch (error) {
+		console.error(
+			`Error getting event details: ${error instanceof Error ? error.message : String(error)}`,
+		);
+		return null;
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Export
 // ---------------------------------------------------------------------------
 
@@ -634,6 +688,7 @@ const calendar = {
 	createEvent,
 	listCalendars,
 	requestCalendarAccess,
+	getEventDetails,
 };
 
 export default calendar;

@@ -423,4 +423,64 @@ end tell`;
 	}
 }
 
-export default { getAllNumbers, findNumber, findContactByPhone, requestContactsAccess };
+async function findEmailByName(name: string): Promise<string[]> {
+	try {
+		const accessResult = await requestContactsAccess();
+		if (!accessResult.hasAccess) {
+			throw new Error(accessResult.message);
+		}
+
+		if (!name || name.trim() === "") {
+			return [];
+		}
+
+		const searchName = sanitizeSearchTerm(name.toLowerCase());
+		const escapedSearchName = escapeAppleScriptString(searchName);
+
+		const script = `
+tell application "Contacts"
+    set matchedEmails to {}
+    set searchText to "${escapedSearchName}"
+    set allPeople to people
+
+    repeat with i from 1 to (count of allPeople)
+        if i > ${CONFIG.MAX_CONTACTS} then exit repeat
+        try
+            set currentPerson to item i of allPeople
+            set personName to name of currentPerson
+            set lowerPersonName to (do shell script "echo " & quoted form of personName & " | tr '[:upper:]' '[:lower:]'")
+
+            if lowerPersonName is searchText or lowerPersonName contains searchText or searchText contains lowerPersonName then
+                try
+                    set emailList to emails of currentPerson
+                    repeat with emailItem in emailList
+                        try
+                            set emailValue to value of emailItem
+                            if emailValue is not "" then
+                                set matchedEmails to matchedEmails & {emailValue}
+                            end if
+                        on error
+                        end try
+                    end repeat
+                on error
+                end try
+            end if
+        on error
+        end try
+    end repeat
+
+    return matchedEmails
+end tell`;
+
+		const result = (await runAppleScript(script)) as any;
+		return (Array.isArray(result) ? result : result ? [result] : [])
+			.filter((email: any) => email && email.trim() !== "");
+	} catch (error) {
+		console.error(
+			`Error finding email for contact: ${error instanceof Error ? error.message : String(error)}`,
+		);
+		return [];
+	}
+}
+
+export default { getAllNumbers, findNumber, findContactByPhone, findEmailByName, requestContactsAccess };

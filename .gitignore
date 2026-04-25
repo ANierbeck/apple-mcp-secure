@@ -27,6 +27,9 @@ index-safe.ts
 setup-global-command.sh
 update-command.sh
 
+# Custom LLM Skills
+skills/
+
 # Diagnostic reports (https://nodejs.org/api/report.html)
 
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json

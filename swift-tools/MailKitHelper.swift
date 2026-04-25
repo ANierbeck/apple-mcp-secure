@@ -18,6 +18,47 @@
 
 import Foundation
 
+// MARK: - Logging Helper
+
+/// MCP-konformes JSON-Logging nach stderr
+/// Alle Logs werden als JSON-Objekte nach stderr geschrieben, um MCP STDIO Transport Compliance zu gewährleisten
+func mcpLog(_ message: String, level: String = "info", component: String = "mailkit", data: [String: Any] = [:]) {
+    var entry: [String: Any] = [
+        "timestamp": ISO8601DateFormatter().string(from: Date()),
+        "level": level,
+        "component": component,
+        "message": message,
+        "pid": ProcessInfo.processInfo.processIdentifier
+    ]
+    
+    // Merge additional data
+    for (key, value) in data {
+        entry[key] = value
+    }
+    
+    do {
+        let jsonData = try JSONSerialization.data(withJSONObject: entry, options: [])
+        if let jsonString = String(data: jsonData, encoding: .utf8) {
+            FileHandle.standardError.write(jsonString.data(using: .utf8)!)
+            FileHandle.standardError.write("\n".data(using: .utf8)!)
+        }
+    } catch {
+        // Fallback: einfaches Logging falls JSON-Serialisierung fehlschlägt
+        FileHandle.standardError.write("[ERROR] ".data(using: .utf8)!)
+        FileHandle.standardError.write(message.data(using: .utf8)!)
+        FileHandle.standardError.write("\n".data(using: .utf8)!)
+    }
+}
+
+func mcpLogError(_ message: String, data: [String: Any] = [:]) {
+    mcpLog(message, level: "error", data: data)
+}
+
+func mcpLogInfo(_ message: String, data: [String: Any] = [:]) {
+    mcpLog(message, level: "info", data: data)
+}
+
+
 // MARK: - Types
 
 struct MailAccount: Codable {
@@ -53,18 +94,24 @@ struct MailError: Codable {
 
 // MARK: - Optimized Mail Query
 
-func getUnreadEmails(account: String? = nil, limit: Int = 50) -> MailKitResponse {
+func getUnreadEmails(account: String? = nil, mailbox: String? = nil, limit: Int = 50) -> MailKitResponse {
     // Use optimized AppleScript with 30s timeout (extra time for IMAP sync)
-    // + focused query (only unread messages, only INBOX mailbox)
+    // + focused query (only unread messages, specified mailbox)
     // + early exit (stop after finding limit unread messages)
-    return getUnreadEmailsViaAppleScriptWithTimeout(account: account, limit: limit, timeoutSecs: 30)
+    return getUnreadEmailsViaAppleScriptWithTimeout(account: account, mailbox: mailbox, limit: limit, timeoutSecs: 30)
 }
 
-func getUnreadEmailsViaAppleScriptWithTimeout(account: String? = nil, limit: Int = 50, timeoutSecs: Int = 3) -> MailKitResponse {
+func getUnreadEmailsViaAppleScriptWithTimeout(account: String? = nil, mailbox: String? = nil, limit: Int = 50, timeoutSecs: Int = 3) -> MailKitResponse {
+    let startTime = Date()
+    let accountDesc = account ?? "all"
+    let mailboxDesc = mailbox ?? "INBOX"
+    mcpLogInfo("Starting getUnreadEmails", data: ["account": accountDesc, "mailbox": mailboxDesc, "limit": limit])
+
     // Build optional account pre-filter snippet for the AppleScript.
     // When a specific account is requested we sync only that account (faster).
     // When no filter is given we sync all accounts.
     let accountFilter = account ?? ""
+    let mailboxFilter = mailbox ?? "INBOX"
     let accountSetup: String
     if accountFilter.isEmpty {
         accountSetup = """
@@ -112,7 +159,7 @@ tell application "Mail"
         end repeat
     end try
 
-    -- Query INBOX of each account for unread messages.
+    -- Query specified mailbox of each account for unread messages.
     -- NOTE: We always iterate ALL accounts in accountsToSearch — no early
     -- exit between accounts. This ensures every account contributes its
     -- unread emails even if an earlier account (e.g. a blocked account)
@@ -122,18 +169,19 @@ tell application "Mail"
     repeat with acct in accountsToSearch
         set acctName to name of acct
         set acctCount to 0
-        set inboxMB to missing value
+        set targetMB to missing value
         try
-            set inboxMB to mailbox "INBOX" of acct
+            set targetMB to mailbox "\(mailboxFilter)" of acct
         on error
             try
-                set inboxMB to inbox of acct
+                set targetMB to mailbox "INBOX" of acct
             end try
         end try
 
-        if inboxMB is not missing value then
+        if targetMB is not missing value then
+            set mbName to name of targetMB
             try
-                set allMsgs to messages of inboxMB
+                set allMsgs to messages of targetMB
                 repeat with i from 1 to length of allMsgs
                     if acctCount >= msgLimit then
                         exit repeat
@@ -144,7 +192,8 @@ tell application "Mail"
                         if msgRead = false then
                             set msgSubject to subject of msg
                             set msgSender to sender of msg
-                            set oneEmail to msgSubject & "|SUBJ_END|" & msgSender & "|SNDR_END|" & acctName & "|EMAIL_END|"
+                            set msgDate to date sent of msg
+                            set oneEmail to msgSubject & "|SUBJ_END|" & msgSender & "|SNDR_END|" & msgDate & "|DATE_END|" & mbName & "|MB_END|" & acctName & "|EMAIL_END|"
                             set end of unreadMsgs to oneEmail
                             set msgCount to msgCount + 1
                             set acctCount to acctCount + 1
@@ -180,8 +229,18 @@ end tell
             guard let sndrEndIdx = afterSubj.range(of: "|SNDR_END|") else { continue }
             let sender = String(afterSubj[..<sndrEndIdx.lowerBound]).trimmingCharacters(in: .whitespaces)
 
-            // Extract account (after |SNDR_END|)
-            let accountStr = String(afterSubj[sndrEndIdx.upperBound...]).trimmingCharacters(in: .whitespaces)
+            // Extract date sent (between |SNDR_END| and |DATE_END|)
+            let afterSndr = String(afterSubj[sndrEndIdx.upperBound...])
+            guard let dateEndIdx = afterSndr.range(of: "|DATE_END|") else { continue }
+            let dateSentStr = String(afterSndr[..<dateEndIdx.lowerBound]).trimmingCharacters(in: .whitespaces)
+
+            // Extract mailbox (between |DATE_END| and |MB_END|)
+            let afterDate = String(afterSndr[dateEndIdx.upperBound...])
+            guard let mbEndIdx = afterDate.range(of: "|MB_END|") else { continue }
+            let mailboxName = String(afterDate[..<mbEndIdx.lowerBound]).trimmingCharacters(in: .whitespaces)
+
+            // Extract account (after |MB_END|)
+            let accountStr = String(afterDate[mbEndIdx.upperBound...]).trimmingCharacters(in: .whitespaces)
 
             // Filter by account if specified (case-insensitive)
             if let filterAccount = account,
@@ -189,22 +248,56 @@ end tell
                 continue
             }
 
+            // Convert AppleScript date string to ISO8601 format
+            // AppleScript returns dates in locale format, e.g. "Dienstag, 24. März 2026 um 14:51:56"
+            let dateSent: String
+            let dateFormatterDE = DateFormatter()
+            dateFormatterDE.locale = Locale(identifier: "de_DE")
+            dateFormatterDE.dateFormat = "EEEE, d. MMMM yyyy 'um' HH:mm:ss"
+            
+            let dateFormatterEN = DateFormatter()
+            dateFormatterEN.locale = Locale(identifier: "en_US_POSIX")
+            dateFormatterEN.dateFormat = "EEEE, MMMM d, yyyy 'at' h:mm:ss a"
+            
+            if let date = dateFormatterDE.date(from: dateSentStr) {
+                dateSent = ISO8601DateFormatter().string(from: date)
+            } else if let date = dateFormatterEN.date(from: dateSentStr) {
+                dateSent = ISO8601DateFormatter().string(from: date)
+            } else {
+                // Fallback: try to parse common formats
+                let flexibleFormatter = DateFormatter()
+                flexibleFormatter.locale = Locale.current
+                flexibleFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+                if let date = flexibleFormatter.date(from: dateSentStr) {
+                    dateSent = ISO8601DateFormatter().string(from: date)
+                } else {
+                    dateSent = ISO8601DateFormatter().string(from: Date())
+                }
+            }
+
             if !subject.isEmpty && !sender.isEmpty {
                 emails.append(EmailMessage(
                     id: UUID().uuidString,
                     subject: subject,
                     sender: sender,
-                    dateSent: ISO8601DateFormatter().string(from: Date()),
+                    dateSent: dateSent,
                     preview: "",
                     content: "",
                     account: accountStr.isEmpty ? (account ?? "Mail") : accountStr,
-                    mailbox: "INBOX",
+                    mailbox: mailboxName.isEmpty ? mailboxFilter : mailboxName,
                     hasAttachments: false,
                     isRead: false
                 ))
             }
         }
 
+        let elapsed = Date().timeIntervalSince(startTime)
+        mcpLogInfo("Completed getUnreadEmails", data: [
+            "elapsed": String(format: "%.2f", elapsed),
+            "emails": emails.count,
+            "errors": emails.isEmpty ? 1 : 0
+        ])
+        
         return MailKitResponse(
             success: !emails.isEmpty,
             accounts: [],
@@ -212,6 +305,7 @@ end tell
             errors: emails.isEmpty ? [MailError(account: account ?? "Mail", reason: "no_unread_emails")] : []
         )
     } catch {
+        mcpLogError("Error in getUnreadEmails", data: ["error": error.localizedDescription])
         return MailKitResponse(
             success: false,
             accounts: [],
@@ -253,6 +347,7 @@ func executeAppleScriptWithTimeout(_ script: String, timeout: Int) throws -> Str
 let arguments = CommandLine.arguments
 var operation = "help"
 var account: String? = nil
+var mailbox: String? = nil
 var limit = 50
 
 var i = 1
@@ -265,6 +360,9 @@ while i < arguments.count {
     case "--account":
         i += 1
         if i < arguments.count { account = arguments[i] }
+    case "--mailbox":
+        i += 1
+        if i < arguments.count { mailbox = arguments[i] }
     case "--limit":
         i += 1
         if i < arguments.count { limit = Int(arguments[i]) ?? 50 }
@@ -278,7 +376,7 @@ let response: MailKitResponse
 
 switch operation {
 case "unread":
-    response = getUnreadEmails(account: account, limit: limit)
+    response = getUnreadEmails(account: account, mailbox: mailbox, limit: limit)
 default:
     response = MailKitResponse(
         success: false,

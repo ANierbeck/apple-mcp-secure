@@ -108,12 +108,17 @@ async function callMailKit(args: string[]): Promise<MailKitResponse> {
  */
 export async function getUnreadEmailsViaMailKit(
 	account?: string,
+	mailbox?: string,
 	limit: number = 50
 ): Promise<MailKitEmail[]> {
 	const args = ["--operation", "unread", "--limit", limit.toString()];
 
 	if (account) {
 		args.push("--account", account);
+	}
+
+	if (mailbox) {
+		args.push("--mailbox", mailbox);
 	}
 
 	const response = await callMailKit(args);

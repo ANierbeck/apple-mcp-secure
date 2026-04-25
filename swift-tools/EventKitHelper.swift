@@ -11,6 +11,44 @@
 import Foundation
 import EventKit
 
+// MARK: - Logging Helper
+
+/// MCP-konformes JSON-Logging nach stderr
+func mcpLog(_ message: String, level: String = "info", component: String = "eventkit", data: [String: Any] = [:]) {
+    var entry: [String: Any] = [
+        "timestamp": ISO8601DateFormatter().string(from: Date()),
+        "level": level,
+        "component": component,
+        "message": message,
+        "pid": ProcessInfo.processInfo.processIdentifier
+    ]
+    
+    for (key, value) in data {
+        entry[key] = value
+    }
+    
+    do {
+        let jsonData = try JSONSerialization.data(withJSONObject: entry, options: [])
+        if let jsonString = String(data: jsonData, encoding: .utf8) {
+            FileHandle.standardError.write(jsonString.data(using: .utf8)!)
+            FileHandle.standardError.write("\n".data(using: .utf8)!)
+        }
+    } catch {
+        FileHandle.standardError.write("[ERROR] ".data(using: .utf8)!)
+        FileHandle.standardError.write(message.data(using: .utf8)!)
+        FileHandle.standardError.write("\n".data(using: .utf8)!)
+    }
+}
+
+func mcpLogError(_ message: String, data: [String: Any] = [:]) {
+    mcpLog(message, level: "error", data: data)
+}
+
+func mcpLogInfo(_ message: String, data: [String: Any] = [:]) {
+    mcpLog(message, level: "info", data: data)
+}
+
+
 // MARK: - Data Models
 
 struct CalendarInfo: Codable {

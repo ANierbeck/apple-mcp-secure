@@ -221,13 +221,14 @@ async function requestMailAccess(): Promise<{ hasAccess: boolean; message: strin
  * Get unread emails from Mail app (limited for performance).
  * If `account` is provided, only that account (matched by name or email address,
  * case-insensitively) is searched; the global whitelist is still respected.
+ * If `mailbox` is provided, only that mailbox is searched.
  */
-async function getUnreadMails(limit = 10, account?: string): Promise<EmailMessage[]> {
+async function getUnreadMails(limit = 10, account?: string, mailbox?: string): Promise<EmailMessage[]> {
 	// Try MailKit first (new, fast)
 	if (isMailKitAvailable()) {
 		try {
 			console.error("[mail] Using MailKit for getUnreadMails (fast path)");
-			const mkEmails = await getUnreadEmailsViaMailKit(account, limit);
+			const mkEmails = await getUnreadEmailsViaMailKit(account, mailbox, limit);
 
 			// Filter by allowed accounts and convert to EmailMessage format
 			return mkEmails

@@ -569,6 +569,7 @@ function initServer() {
 								const emails = await mailModule.getUnreadMails(
 									args.limit,
 									args.account,
+									args.mailbox,
 								);
 
 								const emailSummary = emails.length > 0

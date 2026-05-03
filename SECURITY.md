@@ -927,7 +927,7 @@ LOG_LEVEL=info
 If you discover a security vulnerability:
 
 1. **DO NOT** open a public GitHub issue
-2. **Email** ultimate-surfer@gmx.net with details
+2. **Email** the maintainer privately with details
 3. **Include:** Vulnerability description, impact, reproduction steps
 4. **Allow:** Time for fix before public disclosure (30 days)
 

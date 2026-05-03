@@ -4,7 +4,7 @@
 	"module": "index.ts",
 	"type": "module",
 	"description": "Hardened Apple MCP tools with Swift-powered Mail and Calendar access (10-100x faster)",
-	"author": "Achim Nierbeck <ultimate-surfer@gmx.net>",
+	"author": "Achim Nierbeck",
 	"license": "MIT",
 	"homepage": "https://github.com/ANierbeck/apple-mcp-secure#readme",
 	"repository": {

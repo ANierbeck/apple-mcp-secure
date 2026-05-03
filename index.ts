@@ -558,6 +558,54 @@ function initServer() {
 						const mailModule = await loadModule("mail");
 
 						switch (args.operation) {
+
+								case "unreadThreads": {
+									const threads = await mailModule.getUnreadThreads(
+										args.limit,
+										args.account,
+										args.mailbox,
+									);
+
+									const threadSummary = threads.length > 0
+										? `Found ${threads.length} unread thread(s)${args.account ? ` in account "${args.account}"` : ""}${args.mailbox ? ` and mailbox "${args.mailbox}"` : ""}:
+
+` +
+									threads
+										.map(
+											(thread: any) =>
+												`[${thread.lastMessage.dateSent}] Thread: ${thread.subject} | Participants: ${thread.participants.join(", ")} | Unread: ${thread.unreadCount}/${thread.messageCount} | Ref: ${thread.ref}
+${truncateSmart(thread.lastMessage.preview || "", 500)}`,
+											)
+											.join("\n\n")
+										: `No unread threads found${args.account ? ` in account "${args.account}"` : ""}${args.mailbox ? ` and mailbox "${args.mailbox}"` : ""}`;
+
+									// For Ollama: also return structured JSON data
+									const jsonData = {
+										threads: threads.map((t: any) => ({
+											subject: t.subject,
+											participants: t.participants,
+											unreadCount: t.unreadCount,
+											messageCount: t.messageCount,
+											lastMessage: t.lastMessage,
+											ref: t.ref,
+											account: t.account,
+											mailbox: t.mailbox,
+										})),
+										count: threads.length,
+									};
+
+									return {
+										content: [
+											{
+												type: "text",
+												text: threads.length > 0
+													? tagExternalContent("Apple Mail", threadSummary + "\n\n" + JSON.stringify(jsonData, null, 2))
+													: threadSummary
+												},
+											],
+											isError: false
+										}
+									}
 							case "unread": {
 								if (args.account) {
 									console.error(
@@ -1497,7 +1545,7 @@ function isMessagesArgs(args: unknown): args is {
 }
 
 function isMailArgs(args: unknown): args is {
-	operation: "unread" | "search" | "send" | "reply" | "mailboxes" | "accounts" | "latest" | "trash" | "markRead" | "prepare" | "confirm";
+	operation: "unread" | "unreadThreads" | "search" | "send" | "reply" | "mailboxes" | "accounts" | "latest" | "trash" | "markRead" | "prepare" | "confirm";
 	account?: string;
 	mailbox?: string;
 	limit?: number;
@@ -1535,7 +1583,7 @@ function isMailArgs(args: unknown): args is {
 
 	if (
 		!operation ||
-		!["unread", "search", "send", "reply", "mailboxes", "accounts", "latest", "trash", "markRead", "prepare", "confirm"].includes(
+		!["unread", "unreadThreads", "search", "send", "reply", "mailboxes", "accounts", "latest", "trash", "markRead", "prepare", "confirm"].includes(
 			operation,
 		)
 	) {
@@ -1575,6 +1623,7 @@ function isMailArgs(args: unknown): args is {
 			if (!code || typeof code !== "string") return false;
 			break;
 		case "unread":
+		case "unreadThreads":
 		case "mailboxes":
 		case "accounts":
 		case "latest":

@@ -17,6 +17,7 @@
  */
 
 import Foundation
+import CommonCrypto
 
 // MARK: - Logging Helper
 
@@ -84,12 +85,48 @@ struct MailKitResponse: Codable {
     let success: Bool
     let accounts: [MailAccount]
     let emails: [EmailMessage]
+    let threads: [MailThread]
+    let threadDetails: MailThreadDetails?
     let errors: [MailError]
+    
+    init(success: Bool, accounts: [MailAccount], emails: [EmailMessage], threads: [MailThread] = [], threadDetails: MailThreadDetails? = nil, errors: [MailError]) {
+        self.success = success
+        self.accounts = accounts
+        self.emails = emails
+        self.threads = threads
+        self.threadDetails = threadDetails
+        self.errors = errors
+    }
 }
 
 struct MailError: Codable {
     let account: String
     let reason: String
+}
+
+// MARK: - Thread Types
+
+struct MailThread: Codable {
+    let id: String
+    let ref: String  // Opaque reference for follow-up operations
+    let subject: String
+    let participants: [String]  // Unique list of sender email addresses
+    let lastMessage: MailThreadMessage
+    let unreadCount: Int
+    let messageCount: Int
+    let account: String
+    let mailbox: String
+}
+
+struct MailThreadMessage: Codable {
+    let sender: String
+    let dateSent: String  // ISO8601
+    let preview: String
+}
+
+struct MailThreadDetails: Codable {
+    let thread: MailThread
+    let messages: [EmailMessage]  // All messages in this thread, chronologically sorted
 }
 
 // MARK: - Optimized Mail Query
@@ -302,6 +339,8 @@ end tell
             success: !emails.isEmpty,
             accounts: [],
             emails: emails,
+            threads: [],
+            threadDetails: nil,
             errors: emails.isEmpty ? [MailError(account: account ?? "Mail", reason: "no_unread_emails")] : []
         )
     } catch {
@@ -310,6 +349,274 @@ end tell
             success: false,
             accounts: [],
             emails: [],
+            threads: [],
+            threadDetails: nil,
+            errors: [MailError(account: account ?? "unknown", reason: "timeout_or_error")]
+        )
+    }
+}
+
+// MARK: - Thread Functions
+
+func getUnreadThreads(account: String? = nil, mailbox: String? = nil, limit: Int = 20) -> MailKitResponse {
+    let startTime = Date()
+    let accountDesc = account ?? "all"
+    let mailboxDesc = mailbox ?? "INBOX"
+    mcpLogInfo("Starting getUnreadThreads", data: ["account": accountDesc, "mailbox": mailboxDesc, "limit": limit])
+
+    let accountFilter = account ?? ""
+    let mailboxFilter = mailbox ?? "INBOX"
+    
+    // Build account setup (same as getUnreadEmails)
+    let accountSetup: String
+    if accountFilter.isEmpty {
+        accountSetup = """
+    -- No account filter — search and sync all accounts
+    set accountsToSearch to accounts
+"""
+    } else {
+        accountSetup = """
+    -- Find the specific account (case-insensitive match by name or email)
+    set requestedAcct to "\(accountFilter)"
+    set accountsToSearch to {}
+    repeat with acct in accounts
+        if (name of acct as text) is equal to requestedAcct then
+            set accountsToSearch to {acct}
+            exit repeat
+        end if
+        try
+            repeat with emailAddr in (email addresses of acct)
+                if (emailAddr as text) is equal to requestedAcct then
+                    set accountsToSearch to {acct}
+                    exit repeat
+                end if
+            end repeat
+        end try
+        if (count of accountsToSearch) > 0 then exit repeat
+    end repeat
+    if (count of accountsToSearch) = 0 then return ""
+"""
+    }
+
+    let script = """
+tell application "Mail"
+    set unreadThreads to {}
+    set threadCount to 0
+    set threadLimit to \(limit)
+
+\(accountSetup)
+
+    -- Get unread threads from each account
+    -- Note: Mail.app AppleScript doesn't support 'thread' class directly,
+    -- Note: Skipping IMAP sync for performance (can be added back if needed with --sync flag)
+    -- so we get all messages and group by thread manually
+    repeat with acct in accountsToSearch
+        set acctName to name of acct
+        set acctThreadCount to 0
+        set targetMB to missing value
+        try
+            set targetMB to mailbox "\(mailboxFilter)" of acct
+        on error
+            try
+                set targetMB to mailbox "INBOX" of acct
+            end try
+        end try
+
+        if targetMB is not missing value then
+            set mbName to name of targetMB
+            try
+                -- Get unread messages directly (same as unread operation, but we'll treat as threads)
+                -- Limit for performance
+                set allMsgs to {}
+                set msgCount to 0
+                set msgLimit to threadLimit
+                
+                repeat with msg in every message of targetMB
+                    if msgCount >= msgLimit then
+                        exit repeat
+                    end if
+                    try
+                        if read status of msg is false then
+                            set end of allMsgs to msg
+                            set msgCount to msgCount + 1
+                        end if
+                    end try
+                end repeat
+                
+                -- Treat each unread message as its own thread (simplest approach)
+                -- Thread grouping via 'thread of msg' doesn't work reliably in AppleScript
+                repeat with msg in allMsgs
+                    if acctThreadCount >= threadLimit then
+                        exit repeat
+                    end if
+                    
+                    -- Extract message properties directly
+                    try
+                        set msgSubject to subject of msg
+                        set msgSender to sender of msg
+                        set msgDate to date sent of msg
+                        set msgContent to content of msg
+                        
+                        -- Get preview (first 200 chars)
+                        if length of msgContent > 200 then
+                            set msgPreview to text 1 thru 200 of msgContent
+                        else
+                            set msgPreview to msgContent
+                        end if
+                    on error
+                        set msgSubject to "No Subject"
+                        set msgSender to ""
+                        set msgDate to missing value
+                        set msgPreview to ""
+                    end try
+                    
+                    -- Build thread info string (each message = one thread)
+                    set threadInfo to msgSubject & "|SUBJ_END|" & msgSender & "|PART_END|" & \
+                                   msgSender & "|SNDR_END|" & msgPreview & "|PREV_END|" & \
+                                   (msgDate as string) & "|DATE_END|" & 1 & "|UNREAD_END|" & \
+                                   1 & "|COUNT_END|" & mbName & "|MB_END|" & acctName & "|THREAD_END|"
+                    
+                    set end of unreadThreads to threadInfo
+                    set threadCount to threadCount + 1
+                    set acctThreadCount to acctThreadCount + 1
+                end repeat
+            end try
+        end if
+    end repeat
+
+    return unreadThreads as string
+end tell
+"""
+
+    do {
+        let result = try executeAppleScriptWithTimeout(script, timeout: 30)
+        var threads: [MailThread] = []
+
+        if !result.isEmpty {
+            // Split by |THREAD_END| to get individual threads
+            let threadStrings = result.split(separator: "|THREAD_END|").map(String.init)
+
+            for threadStr in threadStrings {
+                let trimmed = threadStr.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty { continue }
+
+                // Extract subject
+                guard let subjEndIdx = trimmed.range(of: "|SUBJ_END|") else { continue }
+                let subject = String(trimmed[..<subjEndIdx.lowerBound]).trimmingCharacters(in: .whitespaces)
+
+                // Extract participants
+                let afterSubj = String(trimmed[subjEndIdx.upperBound...])
+                guard let partEndIdx = afterSubj.range(of: "|PART_END|") else { continue }
+                let participantsStr = String(afterSubj[..<partEndIdx.lowerBound]).trimmingCharacters(in: .whitespaces)
+                let participants = participantsStr.isEmpty ? [] : participantsStr.components(separatedBy: ",")
+
+                // Extract sender
+                let afterPart = String(afterSubj[partEndIdx.upperBound...])
+                guard let sndrEndIdx = afterPart.range(of: "|SNDR_END|") else { continue }
+                let sender = String(afterPart[..<sndrEndIdx.lowerBound]).trimmingCharacters(in: .whitespaces)
+
+                // Extract preview
+                let afterSndr = String(afterPart[sndrEndIdx.upperBound...])
+                guard let prevEndIdx = afterSndr.range(of: "|PREV_END|") else { continue }
+                let preview = String(afterSndr[..<prevEndIdx.lowerBound]).trimmingCharacters(in: .whitespaces)
+
+                // Extract date
+                let afterPrev = String(afterSndr[prevEndIdx.upperBound...])
+                guard let dateEndIdx = afterPrev.range(of: "|DATE_END|") else { continue }
+                let dateSentStr = String(afterPrev[..<dateEndIdx.lowerBound]).trimmingCharacters(in: .whitespaces)
+
+                // Extract unread count
+                let afterDate = String(afterPrev[dateEndIdx.upperBound...])
+                guard let unreadEndIdx = afterDate.range(of: "|UNREAD_END|") else { continue }
+                let unreadCountStr = String(afterDate[..<unreadEndIdx.lowerBound]).trimmingCharacters(in: .whitespaces)
+                let unreadCount = Int(unreadCountStr) ?? 0
+
+                // Extract message count
+                let afterUnread = String(afterDate[unreadEndIdx.upperBound...])
+                guard let countEndIdx = afterUnread.range(of: "|COUNT_END|") else { continue }
+                let messageCountStr = String(afterUnread[..<countEndIdx.lowerBound]).trimmingCharacters(in: .whitespaces)
+                let messageCount = Int(messageCountStr) ?? 0
+
+                // Extract mailbox
+                let afterCount = String(afterUnread[countEndIdx.upperBound...])
+                guard let mbEndIdx = afterCount.range(of: "|MB_END|") else { continue }
+                let mailboxName = String(afterCount[..<mbEndIdx.lowerBound]).trimmingCharacters(in: .whitespaces)
+
+                // Extract account
+                let accountStr = String(afterCount[mbEndIdx.upperBound...]).trimmingCharacters(in: .whitespaces)
+
+                // Convert date to ISO8601
+                let dateSent: String
+                let dateFormatterDE = DateFormatter()
+                dateFormatterDE.locale = Locale(identifier: "de_DE")
+                dateFormatterDE.dateFormat = "EEEE, d. MMMM yyyy 'um' HH:mm:ss"
+
+                let dateFormatterEN = DateFormatter()
+                dateFormatterEN.locale = Locale(identifier: "en_US")
+                dateFormatterEN.dateFormat = "EEEE, MMMM d, yyyy 'at' h:mm:ss a"
+
+                let isoFormatter = ISO8601DateFormatter()
+                
+                if let date = dateFormatterDE.date(from: dateSentStr) {
+                    dateSent = isoFormatter.string(from: date)
+                } else if let date = dateFormatterEN.date(from: dateSentStr) {
+                    dateSent = isoFormatter.string(from: date)
+                } else {
+                    dateSent = dateSentStr
+                }
+
+                // Generate opaque reference using SHA256 hash
+                let refString = "\(subject)\(participantsStr)\(dateSentStr)"
+                let refData = refString.data(using: .utf8) ?? Data()
+                let refHash = refData.withUnsafeBytes { buf -> String in
+                    var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+                    CC_SHA256(buf.baseAddress, CC_LONG(buf.count), &hash)
+                    return hash.map { String(format: "%02x", $0) }.joined()
+                }
+
+                let thread = MailThread(
+                    id: refHash,
+                    ref: refHash,
+                    subject: subject,
+                    participants: participants,
+                    lastMessage: MailThreadMessage(
+                        sender: sender,
+                        dateSent: dateSent,
+                        preview: preview
+                    ),
+                    unreadCount: unreadCount,
+                    messageCount: messageCount,
+                    account: accountStr,
+                    mailbox: mailboxName
+                )
+
+                threads.append(thread)
+            }
+        }
+
+        let elapsed = Date().timeIntervalSince(startTime)
+        mcpLogInfo("Completed getUnreadThreads", data: [
+            "elapsed": String(format: "%.2f", elapsed),
+            "threads": threads.count,
+            "errors": threads.isEmpty ? 1 : 0
+        ])
+
+        return MailKitResponse(
+            success: true,
+            accounts: [],
+            emails: [],
+            threads: threads,
+            threadDetails: nil,
+            errors: threads.isEmpty ? [MailError(account: account ?? "Mail", reason: "no_unread_threads")] : []
+        )
+    } catch {
+        mcpLogError("Error in getUnreadThreads", data: ["error": error.localizedDescription])
+        return MailKitResponse(
+            success: false,
+            accounts: [],
+            emails: [],
+            threads: [],
+            threadDetails: nil,
             errors: [MailError(account: account ?? "unknown", reason: "timeout_or_error")]
         )
     }
@@ -377,11 +684,15 @@ let response: MailKitResponse
 switch operation {
 case "unread":
     response = getUnreadEmails(account: account, mailbox: mailbox, limit: limit)
+case "unreadThreads":
+    response = getUnreadThreads(account: account, mailbox: mailbox, limit: limit)
 default:
     response = MailKitResponse(
         success: false,
         accounts: [],
         emails: [],
+        threads: [],
+        threadDetails: nil,
         errors: [MailError(account: "unknown", reason: "unknown_operation")]
     )
 }

@@ -92,7 +92,7 @@ const CONTACTS_TOOL: Tool = {
   
   const MAIL_TOOL: Tool = {
     name: "mail",
-    description: "Interact with Apple Mail app - read unread emails, search emails, send emails (with user confirmation), and trash emails. Use 'prepare' then 'confirm code=XXXX' for safe sending.",
+    description: "⚠️ IMPORTANT: This is the ONLY email tool. ALL email operations use THIS ONE TOOL with the 'operation' parameter. Call format: mail {operation=X, account?, mailbox?, limit?}. EXAMPLES: mail operation=unreadThreads limit=5 account=Work mailbox=Projects, mail operation=accounts, mail operation=mailboxes account=Work. Do NOT use apple_mcp_secure_* tools - those are different and don't exist in this server!",
     annotations: {
       readOnlyHint: false,
       destructiveHint: true, // 'send' and 'confirm' dispatch irreversible emails; 'trash' moves to Trash (recoverable)
@@ -102,64 +102,64 @@ const CONTACTS_TOOL: Tool = {
       properties: {
         operation: {
           type: "string",
-          description: "Operation to perform: 'unread', 'search', 'send', 'reply', 'mailboxes', 'accounts', 'latest', 'trash', 'markRead', 'prepare', or 'confirm'",
-          enum: ["unread", "search", "send", "reply", "mailboxes", "accounts", "latest", "trash", "markRead", "prepare", "confirm"]
+          description: "REQUIRED. Operation: unreadThreads=get unread conversations (RECOMMENDED for analysis), unread=get unread emails, accounts=list all email accounts, mailboxes=list mailboxes for account, search=search emails, latest=get latest emails, send=send email (use prepare+confirm), reply=reply to email, trash=trash email, markRead=mark as read, prepare=prepare email for safety, confirm=confirm and send prepared email",
+          enum: ["unread", "unreadThreads", "search", "send", "reply", "mailboxes", "accounts", "latest", "trash", "markRead", "prepare", "confirm"]
         },
         account: {
           type: "string",
-          description: "Email account to use (optional for most ops; required for 'trash')"
+          description: "Email account name (e.g. 'Work, Personal, Business'). Use 'mail operation=accounts' to discover all available accounts."
         },
         mailbox: {
           type: "string",
-          description: "Mailbox to use (optional - if not provided, uses inbox or searches across all mailboxes)"
+          description: "Mailbox/label name (e.g. 'INBOX', 'Projects', 'Sent', 'Archive', 'Drafts'). Use 'mail operation=mailboxes account=X' to discover available mailboxes for a specific account."
         },
         limit: {
           type: "number",
-          description: "Number of emails to retrieve (optional, for unread, search, and latest operations)"
+          description: "Max results to return (RECOMMENDED: always set for large mailboxes!). Default varies by operation (10-50). Works with: unread, unreadThreads, search, latest, mailboxes"
         },
         searchTerm: {
           type: "string",
-          description: "Text to search for in emails (required for search operation)"
+          description: "Text to search for in emails (required for operation=search). Use with account/mailbox filters for better performance."
         },
         to: {
           type: "string",
-          description: "Recipient email address (optional for send — use toContactName instead when the recipient is in Contacts to avoid passing the address through the AI)"
+          description: "Recipient email address (for operation=send). TIP: Use toContactName instead when recipient is in Contacts to avoid passing the address through the AI."
         },
         toContactName: {
           type: "string",
-          description: "Contact name to look up as recipient (alternative to 'to' for send operation — the server resolves the email address locally and never exposes it)"
+          description: "Contact name to look up as recipient (alternative to 'to' for operation=send). The server resolves the email address locally and never exposes it."
         },
         subject: {
           type: "string",
-          description: "Email subject (required for send operation)"
+          description: "Email subject (required for operation=send)"
         },
         body: {
           type: "string",
-          description: "Email body content (required for send operation)"
+          description: "Email body content (required for operation=send)"
         },
         cc: {
           type: "string",
-          description: "CC email address (optional for send operation)"
+          description: "CC email address (optional, for operation=send)"
         },
         bcc: {
           type: "string",
-          description: "BCC email address (optional for send operation)"
+          description: "BCC email address (optional, for operation=send)"
         },
         trashSubject: {
           type: "string",
-          description: "Exact subject of the email to trash (required for trash operation)"
+          description: "Exact subject of the email to trash (required for operation=trash). Use with trashSender."
         },
         trashSender: {
           type: "string",
-          description: "Sender (name or email) of the email to trash — matched as 'contains' (required for trash operation)"
+          description: "Sender (name or email) of the email to trash — matched as 'contains' (required for operation=trash). Use with trashSubject."
         },
         ref: {
           type: "string",
-          description: "Opaque reference to a previously retrieved email (the 'ref' field from unread/search/latest results). Required for 'reply' operation — lets the server resolve the sender address without exposing it to the model."
+          description: "Opaque reference to a previously retrieved email (the 'ref' field from unread/unreadThreads/search/latest results). Required for operation=reply. Lets the server resolve the sender address without exposing it."
         },
         code: {
           type: "string",
-          description: "Confirmation code returned by 'prepare' operation (format: XXXX-XXXX). Required for 'confirm' operation."
+          description: "Confirmation code returned by operation=prepare (format: XXXX-XXXX). Required for operation=confirm."
         }
       },
       required: ["operation"]

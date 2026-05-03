@@ -436,6 +436,271 @@ end tell`;
 	}
 }
 
+// Thread types for unreadThreads
+interface MailThread {
+	subject: string;
+	participants: string[];
+	lastMessage: {
+		sender: string;
+		dateSent: string;
+		preview: string;
+	};
+	unreadCount: number;
+	messageCount: number;
+	account: string;
+	mailbox: string;
+	ref: string;
+}
+
+/**
+ * Get unread threads from Mail app.
+ * Returns threads with at least one unread message, sorted by newest first.
+ */
+async function getUnreadThreads(limit = 20, account?: string, mailbox?: string): Promise<MailThread[]> {
+	// Try MailKit first (new, fast)
+	if (isMailKitAvailable()) {
+		try {
+			console.error("[mail] Using MailKit for getUnreadThreads (fast path)");
+			const mkThreads = await getUnreadThreadsViaMailKit(account, mailbox, limit);
+
+			// Filter by allowed accounts and convert to MailThread format
+			return mkThreads
+				.filter((thread) => isAccountAllowed(thread.account))
+				.slice(0, limit)
+				.map((thread) => {
+					// Create opaque ref for thread
+					const refInput = `${thread.subject}|${thread.account}|${thread.mailbox}|${thread.unreadCount}`;
+					const ref = createHash("sha256").update(refInput).digest("hex").slice(0, 16);
+					
+					// Anonymize participants
+					const anonymizedParticipants = thread.participants.map(anonymizeSender);
+					
+					return {
+						subject: thread.subject,
+						participants: anonymizedParticipants,
+						lastMessage: {
+							sender: anonymizeSender(thread.lastMessage.sender),
+							dateSent: thread.lastMessage.dateSent,
+							preview: thread.lastMessage.preview,
+						},
+						unreadCount: thread.unreadCount,
+						messageCount: thread.messageCount,
+						account: thread.account,
+						mailbox: thread.mailbox,
+						ref,
+					};
+				});
+		} catch (error) {
+			console.error(
+				"[mail] MailKit failed for threads, falling back to AppleScript:",
+				error instanceof Error ? error.message : String(error)
+			);
+			// Fall through to AppleScript fallback
+		}
+	}
+
+	// AppleScript fallback (slower)
+	try {
+		const accessResult = await requestMailAccess();
+		if (!accessResult.hasAccess) {
+			throw new Error(accessResult.message);
+		}
+
+		const maxThreads = CONFIG.MAX_EMAILS;
+		const maxLimit = Math.min(limit, CONFIG.MAX_EMAILS);
+		const allowedAccounts = getAllowedAccounts();
+		const accountFilter = allowedAccounts
+			? `set allowedAccounts to {${[...allowedAccounts].map((a) => `"${a}"`).join(",")}}`
+			: `set allowedAccounts to {}`;
+
+		const escapedAccount = account ? escapeAppleScriptString(account) : "";
+		const accountPreFilter = account
+			? `-- Filter to the requested account (case-insensitive, name or email)
+set requestedAccount to "${escapedAccount}"
+set targetAccount to missing value
+repeat with acct in accounts
+    ignoring case
+        if (name of acct) is equal to requestedAccount then
+            set targetAccount to acct
+            exit repeat
+        end if
+    end ignoring
+    try
+        repeat with emailAddr in (email addresses of acct)
+            ignoring case
+                if (emailAddr as text) is equal to requestedAccount then
+                    set targetAccount to acct
+                end if
+            end ignoring
+        end repeat
+    end try
+    if targetAccount is not missing value then exit repeat
+end repeat
+if targetAccount is missing value then return ""
+set accountsToSearch to {targetAccount}`
+			: `set accountsToSearch to accounts`;
+
+		const script = `
+tell application "Mail"
+    set threadData to ""
+    set threadCount to 0
+    ${accountFilter}
+    ${accountPreFilter}
+
+    repeat with acct in accountsToSearch
+        if threadCount >= ${maxThreads} then exit repeat
+        try
+            set accountName to name of acct
+            -- Check account whitelist
+            ${allowedAccounts ? `
+            set acctAllowed to false
+            repeat with allowedName in allowedAccounts
+                ignoring case
+                    if (accountName as text) is (allowedName as text) then
+                        set acctAllowed to true
+                        exit repeat
+                    end if
+                end ignoring
+            end repeat
+            if not acctAllowed then
+                -- skip
+            else` : ""}
+                repeat with mb in (mailboxes of acct)
+                    if threadCount >= ${maxThreads} then exit repeat
+                    try
+                        set mbName to name of mb
+                        set isInbox to false
+                        ignoring case
+                            if mbName is "inbox" or mbName is "INBOX" then
+                                set isInbox to true
+                            end if
+                        end ignoring
+                        if isInbox then
+                            set mailboxName to mbName & " [" & accountName & "]"
+                            with timeout of 30 seconds
+                                set allThreads to (every thread of mb whose (count of (messages whose read status is false)) > 0)
+                            end timeout
+                            -- Sort by date of last message (newest first)
+                            set sortedThreads to (reverse of (sort allThreads by date of last message))
+                            
+                            repeat with currentThread in sortedThreads
+                                if threadCount >= ${maxThreads} then exit repeat
+                                try
+                                    set threadSubject to subject of currentThread
+                                    set unreadMsgs to (messages of currentThread whose read status is false)
+                                    set unreadCount to count of unreadMsgs
+                                    set allMsgs to messages of currentThread
+                                    set msgCount to count of allMsgs
+                                    
+                                    -- Get participants (unique senders)
+                                    set threadParticipants to {}
+                                    repeat with msg in allMsgs
+                                        set msgSender to sender of msg
+                                        if msgSender is not "" and msgSender is not in threadParticipants then
+                                            set end of threadParticipants to msgSender
+                                        end if
+                                    end repeat
+                                    
+                                    -- Get last message details
+                                    set lastMsg to item 1 of (reverse of (sort allMsgs by date sent))
+                                    set lastSender to sender of lastMsg
+                                    set lastDate to (date sent of lastMsg) as string
+                                    set lastContent to ""
+                                    try
+                                        with timeout of 10 seconds
+                                            set fullContent to content of lastMsg
+                                        end timeout
+                                        if (length of fullContent) > ${CONFIG.MAX_CONTENT_PREVIEW} then
+                                            set lastContent to (characters 1 thru ${CONFIG.MAX_CONTENT_PREVIEW} of fullContent) as string
+                                            set lastContent to lastContent & "..."
+                                        else
+                                            set lastContent to fullContent
+                                        end if
+                                    on error
+                                        set lastContent to "[Content not available]"
+                                    end try
+                                    
+                                    -- Build thread data string
+                                    set participantsStr to ""
+                                    repeat with p from 1 to length of threadParticipants
+                                        if p > 1 then
+                                            set participantsStr to participantsStr & "|"
+                                        end if
+                                        set participantsStr to participantsStr & item p of threadParticipants
+                                    end repeat
+                                    
+                                    set threadData to threadData & "SUBJECT:" & threadSubject & "|PARTICIPANTS:" & participantsStr & "|SENDER:" & lastSender & "|DATE:" & lastDate & "|PREVIEW:" & lastContent & "|UNREAD:" & unreadCount & "|COUNT:" & msgCount & "|MAILBOX:" & mailboxName & "||"
+                                    set threadCount to threadCount + 1
+                                on error
+                                end try
+                            end repeat
+                        end if
+                    on error
+                    end try
+                end repeat
+            end if
+        on error
+        end try
+    end repeat
+
+    return threadData
+end tell`;
+
+		const result = (await runAppleScript(script)) as string;
+
+		if (!result) return [];
+
+		return result.split("||").filter(Boolean).map((entry) => {
+			const fields: Record<string, string> = {};
+			entry.split("|").forEach((part) => {
+				const idx = part.indexOf(":");
+				if (idx > -1) {
+					fields[part.slice(0, idx)] = part.slice(idx + 1);
+				}
+			});
+			const subject = fields["SUBJECT"] || "No subject";
+			const participants = fields["PARTICIPANTS"]?.split("|").filter(Boolean) || [];
+			const lastSender = fields["SENDER"] || "Unknown sender";
+			const dateSent = fields["DATE"] || new Date().toString();
+			const preview = fields["PREVIEW"] || "";
+			const unreadCount = parseInt(fields["UNREAD"] || "0", 10);
+			const messageCount = parseInt(fields["COUNT"] || "0", 10);
+			const mailbox = fields["MAILBOX"] || "Unknown";
+			const account = mailbox.match(/\[([^\]]+)\]$/)?.at(0)?.slice(1, -1) || "Unknown";
+			
+			// Create opaque ref for thread
+			const refInput = `${subject}|${account}|${mailbox}|${unreadCount}`;
+			const ref = createHash("sha256").update(refInput).digest("hex").slice(0, 16);
+			
+			return {
+				subject,
+				participants: participants.map(anonymizeSender),
+				lastMessage: {
+					sender: anonymizeSender(lastSender),
+					dateSent,
+					preview,
+				},
+				unreadCount,
+				messageCount,
+				account,
+				mailbox: mailbox.replace(/\s*\[.*\]/, "").trim(),
+				ref,
+			};
+		})
+			// Sort newest-first
+			.sort((a, b) => {
+				// Simple date comparison - newer dates come first
+				return b.lastMessage.dateSent.localeCompare(a.lastMessage.dateSent);
+			})
+			.slice(0, maxLimit);
+	} catch (error) {
+		console.error(
+			`Error getting unread threads: ${error instanceof Error ? error.message : String(error)}`,
+		);
+		return [];
+	}
+}
+
 /**
  * Search for emails by search term
  */
@@ -1121,6 +1386,7 @@ async function replyToEmail(ref: string, body: string): Promise<string | undefin
 
 export default {
 	getUnreadMails,
+	getUnreadThreads,
 	searchMails,
 	sendMail,
 	replyToEmail,

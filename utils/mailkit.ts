@@ -39,10 +39,35 @@ interface MailKitEmail {
 	isRead: boolean;
 }
 
+interface MailKitThreadMessage {
+	sender: string;
+	dateSent: string; // ISO8601
+	preview: string;
+}
+
+interface MailKitThread {
+	id: string;
+	ref: string; // Opaque reference for follow-up operations
+	subject: string;
+	participants: string[]; // Unique list of sender email addresses
+	lastMessage: MailKitThreadMessage;
+	unreadCount: number;
+	messageCount: number;
+	account: string;
+	mailbox: string;
+}
+
+interface MailKitThreadDetails {
+	thread: MailKitThread;
+	messages: MailKitEmail[]; // All messages in this thread, chronologically sorted
+}
+
 interface MailKitResponse {
 	success: boolean;
 	accounts: MailKitAccount[];
 	emails: MailKitEmail[];
+	threads: MailKitThread[];
+	threadDetails?: MailKitThreadDetails;
 	errors: Array<{ account: string; reason: string }>;
 }
 
@@ -135,6 +160,42 @@ export async function getUnreadEmailsViaMailKit(
 	}
 
 	return response.emails;
+}
+
+/**
+ * Get unread threads from MailKit
+ */
+export async function getUnreadThreadsViaMailKit(
+	account?: string,
+	mailbox?: string,
+	limit: number = 20
+): Promise<MailKitThread[]> {
+	const args = ["--operation", "unreadThreads", "--limit", limit.toString()];
+
+	if (account) {
+		args.push("--account", account);
+	}
+
+	if (mailbox) {
+		args.push("--mailbox", mailbox);
+	}
+
+	const response = await callMailKit(args);
+
+	// "no_unread_threads" is not an error, it's a valid result (empty list)
+	if (!response.success) {
+		const hasOnlyNoThreadsError = response.errors.every(
+			(e) => e.reason === "no_unread_threads"
+		);
+		if (!hasOnlyNoThreadsError) {
+			throw new Error(
+				`MailKit error: ${response.errors.map((e) => `${e.account}: ${e.reason}`).join(", ")}`
+			);
+		}
+		// If only "no_unread_threads" errors, return empty list (success case)
+	}
+
+	return response.threads || [];
 }
 
 /**

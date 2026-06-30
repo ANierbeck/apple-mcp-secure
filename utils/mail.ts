@@ -4,9 +4,16 @@ import { escapeAppleScriptString, sanitizeSearchTerm, validateEmail, validateNam
 import { ensureAppRunning } from "./app-launcher.js";
 import { getUnreadEmailsViaMailKit, isMailKitAvailable } from "./mailkit.js";
 
-// Session-scoped map from opaque ref → {full sender address, subject}.
+// Session-scoped map from opaque ref → email metadata.
 // The model only ever sees the ref, never the raw sender address.
-const emailRefMap = new Map<string, { sender: string; subject: string }>();
+const emailRefMap = new Map<string, {
+	sender: string;
+	subject: string;
+	account?: string;
+	mailbox?: string;
+	dateSent?: string;
+	epoch?: number;
+}>();
 
 // Pending email sends for user confirmation workflow
 // Map: confirmationCode → { to, subject, body, cc?, bcc?, expires }
@@ -119,10 +126,10 @@ function anonymizeSender(sender: string): string {
 	return sender;
 }
 
-function registerEmailRef(sender: string, subject: string, id?: string, epoch?: number): string {
+function registerEmailRef(sender: string, subject: string, id?: string, epoch?: number, account?: string, mailbox?: string, dateSent?: string): string {
 	const input = `${id || ""}|${epoch ?? Date.now()}|${subject}`;
 	const ref = createHash("sha256").update(input).digest("hex").slice(0, 16);
-	emailRefMap.set(ref, { sender, subject });
+	emailRefMap.set(ref, { sender, subject, account, mailbox, dateSent, epoch });
 	return ref;
 }
 
@@ -155,7 +162,7 @@ function isAccountAllowed(accountName: string): boolean {
 	return allowed.has(accountName.trim().toLowerCase());
 }
 
-interface EmailMessage {
+export interface EmailMessage {
 	subject: string;
 	sender: string;
 	dateSent: string;
@@ -236,7 +243,7 @@ async function getUnreadMails(limit = 10, account?: string, mailbox?: string): P
 				.slice(0, limit)
 				.map((email) => {
 					const epoch = new Date(email.dateSent).getTime() / 1000;
-					const ref = registerEmailRef(email.sender, email.subject, undefined, epoch);
+					const ref = registerEmailRef(email.sender, email.subject, undefined, epoch, email.account, email.mailbox, email.dateSent);
 					return {
 						subject: email.subject,
 						sender: anonymizeSender(email.sender),
@@ -1370,6 +1377,93 @@ end tell`;
 }
 
 /**
+ * Mark a previously retrieved email as read using its opaque ref.
+ * Resolves account, mailbox, subject, and sender from the session-scoped map.
+ */
+async function markAsReadByRef(ref: string): Promise<string> {
+	const entry = emailRefMap.get(ref);
+	if (!entry) {
+		throw new Error(`Unknown email ref "${ref}". Refs are session-scoped and expire on server restart.`);
+	}
+
+	if (!entry.account || !entry.mailbox) {
+		throw new Error("Email ref is missing account or mailbox info — cannot mark as read.");
+	}
+
+	try {
+		const accessResult = await requestMailAccess();
+		if (!accessResult.hasAccess) {
+			throw new Error(accessResult.message);
+		}
+
+		const escapedAccount = escapeAppleScriptString(validateName(entry.account, "Account name"));
+		const escapedMailbox = escapeAppleScriptString(entry.mailbox.slice(0, 200));
+		const escapedSubject = escapeAppleScriptString(entry.subject.slice(0, 500));
+		const escapedSender = escapeAppleScriptString(entry.sender.slice(0, 200));
+
+		const script = `
+tell application "Mail"
+    set targetAccount to missing value
+    repeat with acct in accounts
+        ignoring case
+            if (name of acct) is equal to "${escapedAccount}" then
+                set targetAccount to acct
+                exit repeat
+            end if
+        end ignoring
+    end repeat
+    if targetAccount is missing value then
+        return "Error: Account not found: ${escapedAccount}"
+    end if
+
+    set targetMailbox to missing value
+    repeat with mb in (mailboxes of targetAccount)
+        ignoring case
+            if (name of mb) is equal to "${escapedMailbox}" then
+                set targetMailbox to mb
+                exit repeat
+            end if
+        end ignoring
+    end repeat
+    if targetMailbox is missing value then
+        return "Error: Mailbox not found: ${escapedMailbox}"
+    end if
+
+    with timeout of 20 seconds
+        set candidates to (messages of targetMailbox whose subject is "${escapedSubject}")
+    end timeout
+
+    set foundMsg to missing value
+    repeat with msg in candidates
+        ignoring case
+            if (sender of msg) contains "${escapedSender}" then
+                set foundMsg to msg
+                exit repeat
+            end if
+        end ignoring
+    end repeat
+
+    if foundMsg is missing value then
+        return "Error: No matching message found"
+    end if
+
+    set read status of foundMsg to true
+    return "SUCCESS"
+end tell`;
+
+		const result = (await runAppleScript(script)) as string;
+		if (result === "SUCCESS") {
+			return `Marked as read: "${entry.subject}"`;
+		} else {
+			throw new Error(result);
+		}
+	} catch (error) {
+		console.error(`Error marking email as read by ref: ${error instanceof Error ? error.message : String(error)}`);
+		throw new Error(`Error marking email as read: ${error instanceof Error ? error.message : String(error)}`);
+	}
+}
+
+/**
  * Reply to a previously retrieved email using its opaque ref.
  * Looks up the full sender address from the session-scoped map so the address
  * is never exposed to the model.
@@ -1384,6 +1478,229 @@ async function replyToEmail(ref: string, body: string): Promise<string | undefin
 	return sendMail(entry.sender, `Re: ${entry.subject}`, body);
 }
 
+/**
+ * Get full email details by reference ID.
+ * Uses the session-scoped emailRefMap to look up the email metadata,
+ * then fetches the full content from Mail app.
+ * Performance-optimized: uses account/mailbox info from ref map for direct lookup.
+ */
+async function getEmailByRef(ref: string): Promise<EmailMessage | null> {
+	const entry = emailRefMap.get(ref);
+	if (!entry) {
+		throw new Error(
+			`Unknown email ref "${ref}". Refs are session-scoped and expire on server restart.`,
+		);
+	}
+
+	try {
+		const accessResult = await requestMailAccess();
+		if (!accessResult.hasAccess) {
+			throw new Error(accessResult.message);
+		}
+
+		// Fast path: use account and mailbox info from ref map for direct lookup
+		if (entry.account && entry.mailbox) {
+			const escapedAccount = escapeAppleScriptString(entry.account);
+			const escapedSubject = escapeAppleScriptString(entry.subject.slice(0, 500));
+			const escapedSender = escapeAppleScriptString(entry.sender.slice(0, 200));
+
+			const script = `
+tell application "Mail"
+		set targetAccount to missing value
+		repeat with acct in accounts
+			ignoring case
+				if (name of acct) is equal to "${escapedAccount}" then
+					set targetAccount to acct
+					exit repeat
+				end if
+			end ignoring
+		end repeat
+		if targetAccount is missing value then
+			return "Error: Account not found"
+		end if
+
+		set targetMailbox to missing value
+		repeat with mb in (mailboxes of targetAccount)
+			ignoring case
+				if (name of mb) is equal to "${escapeAppleScriptString(entry.mailbox)}" then
+					set targetMailbox to mb
+					exit repeat
+				end if
+			end ignoring
+		end repeat
+		if targetMailbox is missing value then
+			return "Error: Mailbox not found"
+		end if
+
+		-- Find the specific email by subject and sender
+		with timeout of 20 seconds
+			set candidates to (messages of targetMailbox whose subject is "${escapedSubject}")
+		end timeout
+
+		set foundMsg to missing value
+		repeat with msg in candidates
+			ignoring case
+				if (sender of msg) contains "${escapedSender}" then
+					set foundMsg to msg
+					exit repeat
+				end if
+			end ignoring
+		end repeat
+
+		if foundMsg is missing value then
+			return "Error: Message not found"
+		end if
+
+		set emailSubject to subject of foundMsg
+		set emailSender to sender of foundMsg
+		set emailDate to (date sent of foundMsg) as string
+		set emailRead to read status of foundMsg
+		set emailContent to ""
+		try
+			with timeout of 15 seconds
+				set fullContent to content of foundMsg
+			end timeout
+			set emailContent to fullContent
+		on error
+			set emailContent to "[Content not available]"
+		end try
+
+		return "SUBJECT:" & emailSubject & "|SENDER:" & emailSender & "|DATE:" & emailDate & "|CONTENT:" & emailContent & "|READ:" & emailRead & "|MAILBOX:" & (name of targetMailbox)
+	end tell`;
+
+			const result = (await runAppleScript(script)) as string;
+
+			if (result.startsWith("Error:")) {
+				console.error(`Error getting email by ref: ${result}`);
+				return null;
+			}
+
+			const fields: Record<string, string> = {};
+			result.split("|").forEach((part) => {
+				const idx = part.indexOf(":");
+				if (idx > -1) {
+					fields[part.slice(0, idx)] = part.slice(idx + 1);
+				}
+			});
+
+			const fullSender = fields["SENDER"] || entry.sender;
+			const subject = fields["SUBJECT"] || entry.subject;
+			const dateSent = fields["DATE"] || entry.dateSent || new Date().toString();
+			const content = fields["CONTENT"] || "[Content not available]";
+			const isRead = fields["READ"] === "true";
+			const mailbox = fields["MAILBOX"] || entry.mailbox || "Unknown";
+
+			return {
+				subject,
+				sender: anonymizeSender(fullSender),
+				dateSent,
+				content,
+				isRead,
+				mailbox: `${entry.account} - ${mailbox}`,
+				account: entry.account,
+				ref,
+				epoch: entry.epoch,
+			};
+		} else {
+			// Fallback: search across all accounts/mailboxes using the stored metadata
+			// This is slower but handles cases where account/mailbox info is missing
+			const escapedSubject = escapeAppleScriptString(entry.subject.slice(0, 500));
+			const escapedSender = escapeAppleScriptString(entry.sender.slice(0, 200));
+
+			const script = `
+tell application "Mail"
+		set emailData to ""
+		set foundCount to 0
+
+		repeat with acct in accounts
+			if foundCount >= 1 then exit repeat
+			try
+				set accountName to name of acct
+				repeat with mb in (mailboxes of acct)
+				if foundCount >= 1 then exit repeat
+				try
+					with timeout of 20 seconds
+						set candidates to (messages of mb whose subject is "${escapedSubject}")
+					end timeout
+
+					repeat with msg in candidates
+					if foundCount >= 1 then exit repeat
+					ignoring case
+						if (sender of msg) contains "${escapedSender}" then
+							set emailSubject to subject of msg
+							set emailSender to sender of msg
+							set emailDate to (date sent of msg) as string
+							set emailRead to read status of msg
+							set emailContent to ""
+							try
+								with timeout of 15 seconds
+									set fullContent to content of msg
+								end timeout
+								set emailContent to fullContent
+							on error
+								set emailContent to "[Content not available]"
+							end try
+
+							set readStr to "false"
+							if emailRead then set readStr to "true"
+							set emailData to "SUBJECT:" & emailSubject & "|SENDER:" & emailSender & "|DATE:" & emailDate & "|CONTENT:" & emailContent & "|READ:" & readStr & "|MAILBOX:" & (name of mb) & "|ACCOUNT:" & accountName
+							set foundCount to 1
+						end if
+					end ignoring
+				end repeat
+				on error
+				end try
+			end repeat
+		on error
+		end try
+	end repeat
+
+	return emailData
+end tell`;
+
+			const result = (await runAppleScript(script)) as string;
+
+			if (!result) {
+				console.error("No email found for ref:", ref);
+				return null;
+			}
+
+			const fields: Record<string, string> = {};
+			result.split("|").forEach((part) => {
+				const idx = part.indexOf(":");
+				if (idx > -1) {
+					fields[part.slice(0, idx)] = part.slice(idx + 1);
+				}
+			});
+
+			const fullSender = fields["SENDER"] || entry.sender;
+			const subject = fields["SUBJECT"] || entry.subject;
+			const dateSent = fields["DATE"] || entry.dateSent || new Date().toString();
+			const content = fields["CONTENT"] || "[Content not available]";
+			const isRead = fields["READ"] === "true";
+			const mailbox = fields["MAILBOX"] || entry.mailbox || "Unknown";
+			const account = fields["ACCOUNT"] || entry.account || "Unknown";
+
+			return {
+				subject,
+				sender: anonymizeSender(fullSender),
+				dateSent,
+				content,
+				isRead,
+				mailbox: `${account} - ${mailbox}`,
+				account,
+				ref,
+				epoch: entry.epoch,
+			};
+		}
+	} catch (error) {
+		console.error("Error in getEmailByRef:", error);
+		return null;
+	}
+}
+
+export { emailRefMap, registerEmailRef, getEmailByRef };
+
 export default {
 	getUnreadMails,
 	getUnreadThreads,
@@ -1396,7 +1713,9 @@ export default {
 	getLatestMails,
 	trashMail,
 	markAsRead,
+	markAsReadByRef,
 	requestMailAccess,
 	prepareMail,
 	confirmMail,
+	getEmailByRef,
 };

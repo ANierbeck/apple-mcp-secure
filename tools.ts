@@ -92,7 +92,7 @@ const CONTACTS_TOOL: Tool = {
   
   const MAIL_TOOL: Tool = {
     name: "mail",
-    description: "⚠️ IMPORTANT: This is the ONLY email tool. ALL email operations use THIS ONE TOOL with the 'operation' parameter. Call format: mail {operation=X, account?, mailbox?, limit?}. EXAMPLES: mail operation=unreadThreads limit=5 account=Work mailbox=Projects, mail operation=accounts, mail operation=mailboxes account=Work. Do NOT use apple_mcp_secure_* tools - those are different and don't exist in this server!",
+    description: "⚠️ IMPORTANT: This is the ONLY email tool. ALL email operations use THIS ONE TOOL with the 'operation' parameter. Call format: mail {operation: X, account?: string, mailbox?: string, limit?: number}. EXAMPLES: mail operation=unreadThreads limit=5 account=Work mailbox=Projects, mail operation=accounts, mail operation=mailboxes account=Work. REF WORKFLOW: mail {operation:'unread'} → results contain 'ref' field → mail {operation:'details', ref:'<ref>'} to read full content, mail {operation:'markRead', ref:'<ref>'} to mark as read, mail {operation:'reply', ref:'<ref>', body:'...'} to reply. Do NOT use apple_mcp_secure_* tools - those are different and don't exist in this server!",
     annotations: {
       readOnlyHint: false,
       destructiveHint: true, // 'send' and 'confirm' dispatch irreversible emails; 'trash' moves to Trash (recoverable)
@@ -102,8 +102,8 @@ const CONTACTS_TOOL: Tool = {
       properties: {
         operation: {
           type: "string",
-          description: "REQUIRED. Operation: unreadThreads=get unread conversations (RECOMMENDED for analysis), unread=get unread emails, accounts=list all email accounts, mailboxes=list mailboxes for account, search=search emails, latest=get latest emails, send=send email (use prepare+confirm), reply=reply to email, trash=trash email, markRead=mark as read, prepare=prepare email for safety, confirm=confirm and send prepared email",
-          enum: ["unread", "unreadThreads", "search", "send", "reply", "mailboxes", "accounts", "latest", "trash", "markRead", "prepare", "confirm"]
+          description: "REQUIRED. Operation to perform. TWO-STEP REF WORKFLOW: First call unread/search/latest → each result contains a 'ref' field. Then pass that ref to details (read full content), reply (send reply), or markRead (mark as read). Example: mail {operation:'unread'} → [{ref:'a1b2c3', subject:'Hello', ...}] → mail {operation:'details', ref:'a1b2c3'} → full email body. Operations: unread=get unread emails, accounts=list all email accounts, mailboxes=list mailboxes for account, search=search emails, latest=get latest emails, send=send email (use prepare+confirm), reply=reply to email (needs ref), trash=trash email, markRead=mark as read (needs ref), prepare=prepare email for safety, confirm=confirm and send prepared email, details=get full email content (needs ref)",
+          enum: ["unread", "search", "send", "reply", "mailboxes", "accounts", "latest", "trash", "markRead", "prepare", "confirm", "details"]
         },
         account: {
           type: "string",
@@ -155,7 +155,7 @@ const CONTACTS_TOOL: Tool = {
         },
         ref: {
           type: "string",
-          description: "Opaque reference to a previously retrieved email (the 'ref' field from unread/unreadThreads/search/latest results). Required for operation=reply. Lets the server resolve the sender address without exposing it."
+          description: "Opaque reference to a previously retrieved email (the 'ref' field from unread/unreadThreads/search/latest results). Required for operation=reply, operation=details, and operation=markRead. Lets the server resolve the sender address without exposing it."
         },
         code: {
           type: "string",

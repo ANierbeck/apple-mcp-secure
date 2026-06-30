@@ -550,85 +550,39 @@ function initServer() {
 				}
 
 				case "mail": {
-					if (!isMailArgs(args)) {
+					const mailArgs = args;
+					if (!isMailArgs(mailArgs)) {
 						throw new Error("Invalid arguments for mail tool");
 					}
 
 					try {
 						const mailModule = await loadModule("mail");
 
-						switch (args.operation) {
+						switch (mailArgs.operation) {
 
-								case "unreadThreads": {
-									const threads = await mailModule.getUnreadThreads(
-										args.limit,
-										args.account,
-										args.mailbox,
-									);
-
-									const threadSummary = threads.length > 0
-										? `Found ${threads.length} unread thread(s)${args.account ? ` in account "${args.account}"` : ""}${args.mailbox ? ` and mailbox "${args.mailbox}"` : ""}:
-
-` +
-									threads
-										.map(
-											(thread: any) =>
-												`[${thread.lastMessage.dateSent}] Thread: ${thread.subject} | Participants: ${thread.participants.join(", ")} | Unread: ${thread.unreadCount}/${thread.messageCount} | Ref: ${thread.ref}
-${truncateSmart(thread.lastMessage.preview || "", 500)}`,
-											)
-											.join("\n\n")
-										: `No unread threads found${args.account ? ` in account "${args.account}"` : ""}${args.mailbox ? ` and mailbox "${args.mailbox}"` : ""}`;
-
-									// For Ollama: also return structured JSON data
-									const jsonData = {
-										threads: threads.map((t: any) => ({
-											subject: t.subject,
-											participants: t.participants,
-											unreadCount: t.unreadCount,
-											messageCount: t.messageCount,
-											lastMessage: t.lastMessage,
-											ref: t.ref,
-											account: t.account,
-											mailbox: t.mailbox,
-										})),
-										count: threads.length,
-									};
-
-									return {
-										content: [
-											{
-												type: "text",
-												text: threads.length > 0
-													? tagExternalContent("Apple Mail", threadSummary + "\n\n" + JSON.stringify(jsonData, null, 2))
-													: threadSummary
-												},
-											],
-											isError: false
-										}
-									}
 							case "unread": {
-								if (args.account) {
+								if (mailArgs.account) {
 									console.error(
-										`Getting unread emails for account: ${args.account}`,
+										`Getting unread emails for account: ${mailArgs.account}`,
 									);
 								}
 								// getUnreadMails handles account filtering, whitelist, and
 								// safe string-delimited parsing — no inline AppleScript needed.
 								const emails = await mailModule.getUnreadMails(
-									args.limit,
-									args.account,
-									args.mailbox,
+									mailArgs.limit,
+									mailArgs.account,
+									mailArgs.mailbox,
 								);
 
 								const emailSummary = emails.length > 0
-									? `Found ${emails.length} unread email(s)${args.account ? ` in account "${args.account}"` : ""}${args.mailbox ? ` and mailbox "${args.mailbox}"` : ""}:\n\n` +
+									? `Found ${emails.length} unread email(s)${mailArgs.account ? ` in account "${mailArgs.account}"` : ""}${mailArgs.mailbox ? ` and mailbox "${mailArgs.mailbox}"` : ""}:\n\n` +
 										emails
 											.map(
 												(email: any) =>
 													`[${email.dateSent}] From: ${email.sender}${email.ref ? ` | Ref: ${email.ref}` : ""}\nMailbox: ${email.mailbox}\nSubject: ${email.subject}\n${truncateSmart(email.content || "", 1000)}`,
 											)
 											.join("\n\n")
-									: `No unread emails found${args.account ? ` in account "${args.account}"` : ""}${args.mailbox ? ` and mailbox "${args.mailbox}"` : ""}`;
+									: `No unread emails found${mailArgs.account ? ` in account "${mailArgs.account}"` : ""}${mailArgs.mailbox ? ` and mailbox "${mailArgs.mailbox}"` : ""}`;
 								return {
 									content: [
 										{
@@ -643,24 +597,24 @@ ${truncateSmart(thread.lastMessage.preview || "", 500)}`,
 							}
 
 							case "search": {
-								if (!args.searchTerm) {
+								if (!mailArgs.searchTerm) {
 									throw new Error(
 										"Search term is required for search operation",
 									);
 								}
 								const emails = await mailModule.searchMails(
-									args.searchTerm,
-									args.limit,
+									mailArgs.searchTerm,
+									mailArgs.limit,
 								);
 								const searchSummary = emails.length > 0
-									? `Found ${emails.length} email(s) for "${args.searchTerm}"${args.account ? ` in account "${args.account}"` : ""}${args.mailbox ? ` and mailbox "${args.mailbox}"` : ""}:\n\n` +
+									? `Found ${emails.length} email(s) for "${mailArgs.searchTerm}"${mailArgs.account ? ` in account "${mailArgs.account}"` : ""}${mailArgs.mailbox ? ` and mailbox "${mailArgs.mailbox}"` : ""}:\n\n` +
 										emails
 											.map(
 												(email: any) =>
 													`[${email.dateSent}] From: ${email.sender}${email.ref ? ` | Ref: ${email.ref}` : ""}\nMailbox: ${email.mailbox}\nSubject: ${email.subject}\n${truncateSmart(email.content || "", 10000, "\n\n[Content truncated. Use mail details to see full email]")}`,
 											)
 											.join("\n\n")
-									: `No emails found for "${args.searchTerm}"${args.account ? ` in account "${args.account}"` : ""}${args.mailbox ? ` and mailbox "${args.mailbox}"` : ""}`;
+									: `No emails found for "${mailArgs.searchTerm}"${mailArgs.account ? ` in account "${mailArgs.account}"` : ""}${mailArgs.mailbox ? ` and mailbox "${mailArgs.mailbox}"` : ""}`;
 								return {
 									content: [
 										{
@@ -675,34 +629,34 @@ ${truncateSmart(thread.lastMessage.preview || "", 500)}`,
 							}
 
 							case "send": {
-								if (!args.subject || !args.body) {
+								if (!mailArgs.subject || !mailArgs.body) {
 									throw new Error("Subject and body are required for send operation");
 								}
-								if (!args.to && !args.toContactName) {
+								if (!mailArgs.to && !mailArgs.toContactName) {
 									throw new Error(
 										"Either 'to' (email address) or 'toContactName' (contact name) is required for send operation",
 									);
 								}
 								const contactsForMail = await loadModule("contacts");
 								let recipientAddress: string;
-								if (args.toContactName) {
-									const emails = await contactsForMail.findEmailByName(args.toContactName);
+								if (mailArgs.toContactName) {
+									const emails = await contactsForMail.findEmailByName(mailArgs.toContactName);
 									if (emails.length === 0) {
 										throw new Error(
-											`No email address found in Contacts for "${args.toContactName}"`,
+											`No email address found in Contacts for "${mailArgs.toContactName}"`,
 										);
 									}
 									recipientAddress = emails[0];
 								} else {
-									recipientAddress = args.to!;
+									recipientAddress = mailArgs.to!;
 								}
 								await assertSendAllowed("email", recipientAddress, contactsForMail);
 								const result = await mailModule.sendMail(
 									recipientAddress,
-									args.subject,
-									args.body,
-									args.cc,
-									args.bcc,
+									mailArgs.subject,
+									mailArgs.body,
+									mailArgs.cc,
+									mailArgs.bcc,
 								);
 								return {
 									content: [{ type: "text", text: result }],
@@ -711,54 +665,79 @@ ${truncateSmart(thread.lastMessage.preview || "", 500)}`,
 							}
 
 							case "reply": {
-								if (!args.ref || !args.body) {
+								if (!mailArgs.ref || !mailArgs.body) {
 									throw new Error("ref and body are required for reply operation");
 								}
-								const replyResult = await mailModule.replyToEmail(args.ref, args.body);
+								const replyResult = await mailModule.replyToEmail(mailArgs.ref, mailArgs.body);
 								return {
 									content: [{ type: "text", text: replyResult ?? "Reply sent." }],
 									isError: false,
 								};
 							}
 
+						case "details": {
+							if (!mailArgs.ref) {
+								throw new Error("ref is required for details operation");
+							}
+							const email = await mailModule.getEmailByRef(mailArgs.ref);
+							if (!email) {
+								return {
+									content: [{ type: "text", text: `No email found with ref "${mailArgs.ref}". Refs are session-scoped and expire on server restart.` }],
+									isError: true,
+								};
+							}
+							return {
+								content: [
+									{
+										type: "text",
+										text: tagExternalContent(
+											"Apple Mail",
+											`[${email.dateSent}] From: ${email.sender}\nSubject: ${email.subject}\nMailbox: ${email.mailbox}\n\n${email.content}`
+										),
+									},
+								],
+								isError: false,
+							};
+						}
+
 							case "prepare": {
-								if (!args.to && !args.toContactName) {
+								if (!mailArgs.to && !mailArgs.toContactName) {
 									throw new Error("Either 'to' or 'toContactName' is required for prepare operation");
 								}
-								if (!args.subject || !args.body) {
+								if (!mailArgs.subject || !mailArgs.body) {
 									throw new Error("Subject and body are required for prepare operation");
 								}
 								
 								const contactsForMail = await loadModule("contacts");
 								let recipientAddress: string;
-								if (args.toContactName) {
-									const emails = await contactsForMail.findEmailByName(args.toContactName);
+								if (mailArgs.toContactName) {
+									const emails = await contactsForMail.findEmailByName(mailArgs.toContactName);
 									if (emails.length === 0) {
-										throw new Error(`No email address found in Contacts for "${args.toContactName}"`);
+										throw new Error(`No email address found in Contacts for "${mailArgs.toContactName}"`);
 									}
 									recipientAddress = emails[0];
 								} else {
-									recipientAddress = args.to!;
+									recipientAddress = mailArgs.to!;
 								}
 								
 								// Prepare the email and get confirmation code
 								const result = await mailModule.prepareMail(
 									recipientAddress,
-									args.subject,
-									args.body,
-									args.cc,
-									args.bcc,
+									mailArgs.subject,
+									mailArgs.body,
+									mailArgs.cc,
+									mailArgs.bcc,
 								);
 								
 								// format the response with the confirmation code
-								const displayTo = args.toContactName || recipientAddress;
+								const displayTo = mailArgs.toContactName || recipientAddress;
 								return {
 									content: [{
 										type: "text",
 										text: `⚠️  EMAIL READY TO SEND\n` +
 											`To: ${displayTo}\n` +
-											`Subject: ${args.subject}\n` +
-											`Body preview: ${args.body.substring(0, 100)}${args.body.length > 100 ? "..." : ""}\n` +
+											`Subject: ${mailArgs.subject}\n` +
+											`Body preview: ${mailArgs.body.substring(0, 100)}${mailArgs.body.length > 100 ? "..." : ""}\n` +
 											`---\n` +
 											`Confirm with: mail confirm code=${result.code}\n` +
 											`(Code expires in 5 minutes)`,
@@ -768,11 +747,11 @@ ${truncateSmart(thread.lastMessage.preview || "", 500)}`,
 							}
 
 							case "confirm": {
-								if (!args.code) {
+								if (!mailArgs.code) {
 									throw new Error("Confirmation code is required for confirm operation");
 								}
 								
-								const result = await mailModule.confirmMail(args.code);
+								const result = await mailModule.confirmMail(mailArgs.code);
 								return {
 									content: [{ type: "text", text: result }],
 									isError: false,
@@ -780,9 +759,9 @@ ${truncateSmart(thread.lastMessage.preview || "", 500)}`,
 							}
 
 							case "mailboxes": {
-								if (args.account) {
+								if (mailArgs.account) {
 									const mailboxes = await mailModule.getMailboxesForAccount(
-										args.account,
+										mailArgs.account,
 									);
 									return {
 										content: [
@@ -790,8 +769,8 @@ ${truncateSmart(thread.lastMessage.preview || "", 500)}`,
 												type: "text",
 												text:
 													mailboxes.length > 0
-														? `Found ${mailboxes.length} mailboxes for account "${args.account}":\n\n${mailboxes.join("\n")}`
-														: `No mailboxes found for account "${args.account}". Make sure the account name is correct.`,
+														? `Found ${mailboxes.length} mailboxes for account "${mailArgs.account}":\n\n${mailboxes.join("\n")}`
+														: `No mailboxes found for account "${mailArgs.account}". Make sure the account name is correct.`,
 											},
 										],
 										isError: false,
@@ -830,7 +809,7 @@ ${truncateSmart(thread.lastMessage.preview || "", 500)}`,
 							}
 
 							case "latest": {
-								let account = args.account;
+								let account = mailArgs.account;
 								if (!account) {
 									const accounts = await mailModule.getAccounts();
 									if (accounts.length === 0) {
@@ -842,7 +821,7 @@ ${truncateSmart(thread.lastMessage.preview || "", 500)}`,
 								}
 								const emails = await mailModule.getLatestMails(
 									account,
-									args.limit,
+									mailArgs.limit,
 								);
 								const latestSummary = emails.length > 0
 									? `Found ${emails.length} latest email(s) in account "${account}":\n\n` +
@@ -867,15 +846,15 @@ ${truncateSmart(thread.lastMessage.preview || "", 500)}`,
 							}
 
 							case "trash": {
-								if (!args.account || !args.trashSubject || !args.trashSender) {
+								if (!mailArgs.account || !mailArgs.trashSubject || !mailArgs.trashSender) {
 									throw new Error(
 										"account, trashSubject, and trashSender are required for trash operation",
 									);
 								}
 								const trashResult = await mailModule.trashMail(
-									args.account,
-									args.trashSubject,
-									args.trashSender,
+									mailArgs.account,
+									mailArgs.trashSubject,
+									mailArgs.trashSender,
 								);
 								return {
 									content: [{ type: "text", text: trashResult }],
@@ -884,16 +863,10 @@ ${truncateSmart(thread.lastMessage.preview || "", 500)}`,
 							}
 
 							case "markRead": {
-								if (!args.account || !args.trashSubject || !args.trashSender) {
-									throw new Error(
-										"account, trashSubject, and trashSender are required for markRead operation",
-									);
+								if (!mailArgs.ref) {
+									throw new Error("ref is required for markRead operation");
 								}
-								const markResult = await mailModule.markAsRead(
-									args.account,
-									args.trashSubject,
-									args.trashSender,
-								);
+								const markResult = await mailModule.markAsReadByRef(mailArgs.ref);
 								return {
 									content: [{ type: "text", text: markResult }],
 									isError: false,
@@ -901,7 +874,7 @@ ${truncateSmart(thread.lastMessage.preview || "", 500)}`,
 							}
 
 							default:
-								throw new Error(`Unknown operation: ${args.operation}`);
+								throw new Error(`Unknown operation: ${mailArgs.operation}`);
 						}
 					} catch (error) {
 						return {
@@ -1545,7 +1518,7 @@ function isMessagesArgs(args: unknown): args is {
 }
 
 function isMailArgs(args: unknown): args is {
-	operation: "unread" | "unreadThreads" | "search" | "send" | "reply" | "mailboxes" | "accounts" | "latest" | "trash" | "markRead" | "prepare" | "confirm";
+	operation: "unread" | "search" | "send" | "reply" | "mailboxes" | "accounts" | "latest" | "trash" | "markRead" | "prepare" | "confirm" | "details";
 	account?: string;
 	mailbox?: string;
 	limit?: number;
@@ -1583,7 +1556,7 @@ function isMailArgs(args: unknown): args is {
 
 	if (
 		!operation ||
-		!["unread", "unreadThreads", "search", "send", "reply", "mailboxes", "accounts", "latest", "trash", "markRead", "prepare", "confirm"].includes(
+		!["unread", "search", "send", "reply", "mailboxes", "accounts", "latest", "trash", "markRead", "prepare", "confirm", "details"].includes(
 			operation,
 		)
 	) {
@@ -1606,11 +1579,16 @@ function isMailArgs(args: unknown): args is {
 			if (!ref || typeof ref !== "string") return false;
 			if (!body || typeof body !== "string") return false;
 			break;
+		case "details":
+			if (!ref || typeof ref !== "string") return false;
+			break;
 		case "trash":
-		case "markRead":
 			if (!account || typeof account !== "string") return false;
 			if (!trashSubject || typeof trashSubject !== "string") return false;
 			if (!trashSender || typeof trashSender !== "string") return false;
+			break;
+		case "markRead":
+			if (!ref || typeof ref !== "string") return false;
 			break;
 		case "prepare":
 			if (!to && !toContactName) return false;
@@ -1623,7 +1601,6 @@ function isMailArgs(args: unknown): args is {
 			if (!code || typeof code !== "string") return false;
 			break;
 		case "unread":
-		case "unreadThreads":
 		case "mailboxes":
 		case "accounts":
 		case "latest":

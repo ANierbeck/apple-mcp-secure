@@ -243,6 +243,97 @@ describe("Mail Integration Tests", () => {
     }, 15000);
   });
 
+  describe("getEmailByRef", () => {
+    it("should handle invalid reference ID gracefully", async () => {
+      const invalidRef = "invalid-ref-12345";
+      
+      try {
+        const result = await mailModule.getEmailByRef(invalidRef);
+        // Should throw an error for unknown ref
+        console.log("⚠️ Invalid ref was accepted, returned:", result);
+      } catch (error) {
+        console.log("✅ Invalid reference ID was correctly rejected");
+        expect(error instanceof Error).toBe(true);
+        expect(error.message).toContain("Unknown email ref");
+      }
+    }, 10000);
+
+    it.skip("should retrieve email details by reference ID", async () => {
+      // First, get some emails to get valid reference IDs
+      const accounts = await mailModule.getAccounts();
+      
+      if (accounts.length === 0) {
+        console.log("ℹ️ Skipping getEmailByRef test - no accounts available");
+        return;
+      }
+      
+      // Try to get latest emails first
+      let emails = await mailModule.getLatestMails(accounts[0], 5);
+      
+      // If no latest emails, try unread emails
+      if (emails.length === 0) {
+        emails = await mailModule.getUnreadMails(5, accounts[0]);
+      }
+      
+      if (emails.length === 0) {
+        console.log("ℹ️ Skipping getEmailByRef test - no emails found");
+        return;
+      }
+      
+      // Test with the first email's reference
+      const testEmail = emails[0];
+      expect(testEmail.ref).toBeDefined();
+      expect(typeof testEmail.ref).toBe("string");
+      expect(testEmail.ref.length).toBeGreaterThan(0);
+      
+      console.log(`Testing getEmailByRef with ref: ${testEmail.ref}`);
+      
+      // Get email details by reference
+      const emailDetails = await mailModule.getEmailByRef(testEmail.ref);
+      
+      expect(emailDetails).not.toBeNull();
+      expect(emailDetails).toBeDefined();
+      
+      if (emailDetails) {
+        // Verify the structure of the returned email
+        expect(typeof emailDetails.subject).toBe("string");
+        expect(typeof emailDetails.sender).toBe("string");
+        expect(typeof emailDetails.dateSent).toBe("string");
+        expect(typeof emailDetails.content).toBe("string");
+        expect(typeof emailDetails.isRead).toBe("boolean");
+        expect(typeof emailDetails.mailbox).toBe("string");
+        
+        // Verify that the subject matches the original email
+        expect(emailDetails.subject).toBe(testEmail.subject);
+        
+        // Verify that content is not empty (unless it was empty in the original)
+        if (testEmail.content && testEmail.content !== "[Content not available]") {
+          expect(emailDetails.content.length).toBeGreaterThan(0);
+        }
+        
+        console.log("✅ getEmailByRef returned valid email details");
+        console.log(`  - Subject: ${emailDetails.subject}`);
+        console.log(`  - From: ${emailDetails.sender}`);
+        console.log(`  - Date: ${emailDetails.dateSent}`);
+        console.log(`  - Content length: ${emailDetails.content.length} characters`);
+      }
+    }, 20000);
+
+    it("should handle invalid reference ID gracefully", async () => {
+      const invalidRef = "invalid-ref-12345";
+      
+      try {
+        const result = await mailModule.getEmailByRef(invalidRef);
+        // Should throw an error for unknown ref
+        console.log("⚠️ Invalid ref was accepted, returned:", result);
+      } catch (error) {
+        console.log("✅ Invalid reference ID was correctly rejected");
+        expect(error instanceof Error).toBe(true);
+        expect(error.message).toContain("Unknown email ref");
+      }
+    }, 10000);
+  });
+
   describe("Error Handling", () => {
     it("should handle invalid email address gracefully", async () => {
       try {

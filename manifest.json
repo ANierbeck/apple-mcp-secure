@@ -1,6 +1,6 @@
 {
 	"dxt_version": "0.1",
-	"name": "apple-mcp",
+	"name": "apple-mcp-secure",
 	"display_name": "Apple MCP",
 	"version": "1.0.0",
 	"description": "Apple MCP tools for contacts, notes, messages, mail, reminders, calendar, and maps integration",

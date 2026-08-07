@@ -249,6 +249,85 @@ bun run dev
 
 The MCP server will start and be ready to use with Claude or other MCP clients.
 
+### Claude Configuration (JSON)
+
+The server communicates over stdio, so the MCP client (Claude Desktop, Claude Code, or any
+other MCP host) starts it for you — you only need to register it in the configuration file.
+
+> **Important:** Use **Bun** as the runtime. The bundled `dist/index.js` contains `bun:`
+> imports and will not run under plain Node.js.
+
+#### Claude Desktop
+
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json` and add the server
+under `mcpServers`:
+
+```json
+{
+  "mcpServers": {
+    "apple-mcp-secure": {
+      "command": "bun",
+      "args": ["run", "/absolute/path/to/apple-mcp-secure/index.ts"],
+      "env": {
+        "APPLE_MCP_MAIL_ACCOUNT_WHITELIST": "Work,Personal",
+        "APPLE_MCP_CALENDAR_ALLOWLIST": "Personal,Family"
+      }
+    }
+  }
+}
+```
+
+Replace `/absolute/path/to/apple-mcp-secure` with your clone location (relative paths are
+not resolved reliably by MCP hosts). If `bun` is not on the PATH used by Claude Desktop,
+use the full binary path (find it with `which bun`, typically `~/.bun/bin/bun`).
+
+The `env` block is optional — omit it to expose all accounts and calendars. All supported
+variables:
+
+| Variable | Effect |
+|----------|--------|
+| `APPLE_MCP_MAIL_ACCOUNT_WHITELIST` | Comma-separated mail accounts visible to the AI |
+| `APPLE_MCP_SEND_WHITELIST` | Recipients allowed for outgoing mail |
+| `APPLE_MCP_ALLOW_UNKNOWN_RECIPIENTS` | Allow sending to addresses not in Contacts |
+| `APPLE_MCP_CALENDAR_ALLOWLIST` | Only these calendars are queried |
+| `APPLE_MCP_CALENDAR_BLOCKLIST` | These calendars are excluded |
+
+Restart Claude Desktop after editing the file. The tools appear with the server name as
+prefix, e.g. the `mail` tool becomes `apple_mcp_secure_mail` in the client.
+
+#### Claude Code
+
+Either register via CLI:
+
+```bash
+claude mcp add apple-mcp-secure -- bun run /absolute/path/to/apple-mcp-secure/index.ts
+```
+
+Or add the same JSON block to a project-scoped `.mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "apple-mcp-secure": {
+      "command": "bun",
+      "args": ["run", "/absolute/path/to/apple-mcp-secure/index.ts"]
+    }
+  }
+}
+```
+
+#### Verifying the setup
+
+Ask Claude to run `mail operation=accounts` — a working setup returns your account list
+(filtered by the whitelist). If you only see a server status line, the client is still
+using a cached/old server process: fully restart the client so it respawns the server.
+
+#### Troubleshooting
+
+- **`spawn bun ENOENT`** — Claude can't find Bun; use the absolute path to the `bun` binary in `command`.
+- **Tools listed but calls fail** — the client caches tool definitions; fully quit and restart the client after code changes.
+- **Permission errors** — grant Calendar/Mail/Contacts access to the client app (see *First Run* below).
+
 ### Requirements
 - macOS 10.15+ (EventKit and MailKit frameworks)
 - Bun runtime (or Node.js)
